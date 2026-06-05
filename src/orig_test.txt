@@ -1,0 +1,935 @@
+1 # include < stdio .h >
+2 # include " Vprocessor . h "
+3
+4 # ifndef _UTILS_H_
+5 # define _UTILS_H_
+6
+7 # define PROC ( x ) processor__DOT__ ## x
+8 # define VCPU ( x ) processor__DOT__c__DOT__ ## x
+9
+10 # define S_FETCH 0
+11 # define S_EXECUTE 1
+12 # define S_EXECUTE2 2
+13
+14 void print_arr ( SData * arr , int len ) {
+15 for ( int i = 0; i < len ; ++ i )
+16 fprintf ( stderr , " %04 x " , arr [ i ]);
+17 }
+18
+19 void print_mem ( CData * arr , int len ) {
+20 for ( int i = 0; i < len ; ++ i )
+21 fprintf ( stderr , " %02 x " , arr [ i ]);
+22 }
+23
+24 void print_registers ( Vprocessor * tb ) {
+25 fprintf ( stderr ,
+26 " Misc . registers : state =%02 x counter =%02 x , N =%02 x X =%02 x I =%02 x D =%02 x \ n " ,
+27 tb - > processor__DOT__c__DOT__state ,
+28 tb - > processor__DOT__c__DOT__clock_counter ,
+29 tb - > processor__DOT__c__DOT__N_register ,
+30 tb - > processor__DOT__c__DOT__X_register ,
+31 tb - > processor__DOT__c__DOT__I_register ,
+32 tb - > p r o c e s s o r _ _ D O T _ _ c _ _ D O T _ _ D _ r e g i s t e r );
+33
+34 fprintf ( stderr , " R_registers : " );
+35 print_arr ( tb - > processor__DOT__c__DOT__R_registers , 16);
+42
+36 }
+37
+38 void print_state ( Vprocessor * tb ) {
+39 print_registers ( tb );
+40 fprintf ( stderr , " \ nMemory : " );
+41 print_mem ( tb - > processor__DOT__m__DOT__mem , 32);
+42 fprintf ( stderr , " \ n " );
+43 }
+44
+45 void clock_cycle ( Vprocessor * tb ) {
+46 tb - > clk = 0;
+47 tb - > eval ();
+48 tb - > clk = 1;
+49 tb - > eval ();
+50 }
+51
+52 void machine_cycle ( Vprocessor * tb ) {
+53 for ( int i = 0; i < 3; i ++) {
+54 clock_cycle ( tb );
+55 }
+56 }
+57
+58 # endif
+   utils.h
+1 # include < assert .h >
+2 # include < stdlib .h >
+3 # include < stdint .h >
+4 # include < stdio .h >
+5 # include < string .h >
+6
+7 # include < functional >
+8 # include < string >
+9
+10 # include " Vprocessor . h "
+11 # include " verilated . h "
+12 # include " verilator_test . h "
+13 # include " utils . h "
+14
+15 # define RESET " \ x1B [0 m "
+16 # define RED " \ x1B [31 m "
+17 # define GREEN " \ x1B [32 m "
+18
+19 # define NBRANCH_PROG ( x ) ( x ) , sizeof ( x ) , sizeof ( x )
+20 # define PROG ( x ) ( x ) , sizeof ( x )
+21
+22 # define STRINGIZE ( x ) # x
+23 # define LINE ( x ) STRINGIZE ( x )
+24 # define ASSERT ( x ) \
+25 if (!( x )) throw ( const char *)(# x " ( " __FILE__ " : " LINE ( __LINE__ ) " ) " );
+26
+27 typedef Vprocessor * Vtp ;
+28 typedef const Vprocessor * CVtp ;
+29
+30 void run_test ( Vprocessor * tb ,
+31 const char * name ,
+32 const char * prog ,
+33 size_t prog_len ,
+34 size_t instr_cycles ,
+35 void (* setup )( Vtp , void *) ,
+36 void (* verifier )( CVtp , void *) ,
+37 void * data )
+43
+38 {
+39 try {
+40 memset ( tb - > processor__DOT__m__DOT__mem , 0 , sizeof ( tb - > pro ce sso r_ _D OT_ _m __ DOT _ _ m e m ));
+41 memset ( tb - > VCPU ( R_registers ) , 0 xCC , 32);
+42 tb - > VCPU ( alu_operand ) = 0 xCC ;
+43 tb - > VCPU ( alu_result ) = 0 xCC ;
+44 tb - > VCPU ( D_register ) = 0 xCC ;
+45
+46 tb - > reset = 1;
+47 clock_cycle ( tb );
+48
+49 ASSERT ( tb - > VCPU ( R_registers [0]) == 0);
+50 ASSERT ( tb - > VCPU ( I_register ) == 0);
+51 ASSERT ( tb - > VCPU ( N_register ) == 0);
+52 ASSERT ( tb - > VCPU ( P_register ) == 0);
+53 ASSERT ( tb - > VCPU ( Q ) == 0);
+54 ASSERT ( tb - > PROC ( bus_from_cpu ) == 0);
+55 ASSERT ( tb - > PROC ( ram_we ) == 0);
+56 ASSERT ( tb - > PROC ( address_from_cpu ) == 0);
+57 ASSERT ( tb - > VCPU ( clock_counter ) == 0);
+58 ASSERT ( tb - > VCPU ( state ) == S_FETCH );
+59
+60 tb - > reset = 0;
+61 ASSERT ( tb - > VCPU ( clock_counter ) == 0);
+62
+63 memcpy ( tb - > processor__DOT__m__DOT__mem , prog , prog_len );
+64 setup ( tb , data );
+65
+66 for ( int i = 0; i < instr_cycles ; i ++) {
+67 machine_cycle ( tb );
+68 machine_cycle ( tb );
+69
+70 if ( tb - > VCPU ( I_register ) == 0 xC ) {
+71 machine_cycle ( tb );
+72 }
+73
+74 ASSERT ( tb - > VCPU ( state ) == S_FETCH );
+75 }
+76
+77 verifier ( tb , data );
+78 fprintf ( stderr , RESET GREEN " [ P ] % s \ n " RESET , name );
+79 }
+80 catch ( const char * e ) {
+81 fprintf ( stderr , RESET RED " [ F ] % s \ n " RESET , name );
+82 fprintf ( stderr , " --> % s \ n " , e );
+83 print_state ( tb );
+84 }
+85 }
+86
+87 void tb_noop ( Vtp tb , void *){}
+88
+89 void run_basic_test ( Vprocessor * tb ,
+90 const char * name ,
+91 const char * prog ,
+92 size_t prog_len ,
+93 size_t instr_cycles ,
+94 void (* f )( CVtp , void *) ,
+95 void * data )
+96 {
+97 run_test ( tb , name , prog , prog_len , instr_cycles , tb_noop , f , data );
+98 }
+99
+
+100 int main ( int argc , char * argv [])
+101 {
+102 Verilated :: commandArgs ( argc , argv );
+103 Vprocessor * tb = new Vprocessor ;
+104 char buf [32];
+105
+106 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+107 // 00 ( IDL ) Check that CPU stops after instruction
+108 //
+109 // We ’ re on CentOS 6 with G ++ 4.4 , so no lambdas . Emulate them with
+110 // structs with static functions instead , which is kind of gross .
+111
+112 struct IDLTest1 {
+113 static void verify_00_IDL ( CVtp tb , void *) {
+114 // ASSERT ( tb - > VCPU ( idle ));
+115 ASSERT ( tb - > VCPU ( R_registers [1] == 0));
+116 ASSERT ( tb - > VCPU ( R_registers [0] == 2));
+117 }
+118 };
+119
+120 run_basic_test ( tb ,
+121 " 00 IDL " ,
+122 NBRANCH_PROG ( " \ x00 \ x01 \ x01 \ x01 " ) ,
+123 IDLTest1 :: verify_00_IDL ,
+124 NULL );
+125
+126 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+127 // 01 -0 F ( LDN )
+128
+129 struct LDNTest1 {
+130 static void verify_0N_LDN ( CVtp tb , void * data ) {
+131 ASSERT ( tb - > VCPU ( D_register ) == 0 xB3 );
+132 }
+133
+134 static void setup_0N_LDN ( Vtp tb , void * data ) {
+135 tb - > VCPU ( R_registers [( size_t ) data ]) = 0 xB3 ;
+136 }
+137 };
+138
+139 for ( int x = 0 x01 ; x <= 0 x0F ; x ++) {
+140 char c = ( char ) x ;
+141 sprintf ( buf , " %02 X LDN R ( N ) -> D " , x );
+142 run_test ( tb , buf , &c , 1 , 1 ,
+143 LDNTest1 :: setup_0N_LDN ,
+144 LDNTest1 :: verify_0N_LDN ,
+145 ( void *)( x & 0 x0F ));
+146 }
+147
+148 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+149 // 10 -1 F ( INC )
+150
+151 char inc_prog1 [7];
+152
+153 // Testing INC R (0) is hard since R (0) is the default program counter .
+154 // Need to do setup to switch P to R (3) , reset R (0) , and increment .
+155 char inc_prog2 [] = " \ xF8 \ x07 \ xA3 \ xF8 \ x00 \ xB3 \ xD3 \ xA0 \ x10 \ x10 \ x10 \ x10 \ x10 " ;
+156
+157 struct INCTest1 {
+158 static void setup_1N_INC ( Vtp tb , void * data ) {
+159 tb - > VCPU ( R_registers [( size_t ) data ]) = 0;
+160 }
+161
+162 static void verify_1N_INC ( CVtp tb , void * data ) {
+163 ASSERT ( tb - > VCPU ( R_registers [( size_t ) data ]) == 7);
+164 }
+165 };
+166
+167 struct INCTest2 {
+168 static void verify_10_INC ( CVtp tb , void *) {
+169 ASSERT ( tb - > VCPU ( R_registers [0]) == 5);
+170 }
+171 };
+172
+173 run_basic_test ( tb ,
+174 " 10 INC R (0) " ,
+175 NBRANCH_PROG ( inc_prog2 ) ,
+176 INCTest2 :: verify_10_INC ,
+177 NULL );
+178
+179 for ( int x = 0 x11 ; x <= 0 x1F ; x ++) {
+180 sprintf ( buf , " %02 X INC R ( N ) " , x );
+181 memset ( inc_prog1 , x , sizeof ( inc_prog1 ));
+182
+183 run_test ( tb ,
+184 buf ,
+185 NBRANCH_PROG ( inc_prog1 ) ,
+186 INCTest1 :: setup_1N_INC ,
+187 INCTest1 :: verify_1N_INC ,
+188 ( void *)( x & 0 x0F ));
+189 }
+190
+191 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+192 // 20 -2 F ( DEC )
+193
+194 char dec_prog1 [3];
+195
+196 // Same issue as INC on R (0) - R (0) is the program counter
+197 char dec_prog2 [] = " \ xF8 \ x07 \ xA3 \ xF8 \ x00 \ xB3 \ xD3 \ xA0 \ x20 \ x20 \ x20 " ;
+198
+199 struct DECTest1 {
+200 static void setup_2N_DEC ( Vtp tb , void * data ) {
+201 tb - > VCPU ( R_registers [( size_t ) data ]) = 13;
+202 }
+203
+204 static void verify_2N_DEC ( CVtp tb , void * data ) {
+205 tb - > VCPU ( R_registers [( size_t ) data ]) == 10;
+206 }
+207 };
+208
+209 struct DECTest2 {
+210 static void verify_20_DEC ( CVtp tb , void *) {
+211 tb - > VCPU ( R_registers [0]) == 0 xFFFD ;
+212 }
+213 };
+214
+215 run_basic_test ( tb ,
+216 " 20 DEC R (0) " ,
+217 NBRANCH_PROG ( dec_prog2 ) ,
+218 DECTest2 :: verify_20_DEC ,
+219 NULL );
+220
+221 for ( int x = 0 x21 ; x <= 0 x2F ; x ++) {
+222 sprintf ( buf , " %02 X DEC R ( N ) " , x );
+223 memset ( dec_prog1 , x , sizeof ( dec_prog1 ));
+224
+225 run_test ( tb ,
+226 buf ,
+227 NBRANCH_PROG ( dec_prog1 ) ,
+228 DECTest1 :: setup_2N_DEC ,
+229 DECTest1 :: verify_2N_DEC ,
+230 ( void *)( x & 0 x0F ));
+231 }
+232
+233 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+234 // 30 -3 F ( SHORT BRANCH )
+235
+236 char br_test_progs1 [13][20] = {
+237 // 30: unconditional
+238 // End condition : R (0) == 0 x04 after two instructions
+239 " \ x30 \ x0F \ x30 \ x06 \ x00 \ x00 \ x00 \ x00 \ x00 \ x30 \ x0C \ x30 \ x05 \ x00 \ x00 \ x30 \ x04 " ,
+240
+241 // 31: if Q == 1 || 39: if Q == 0
+242 // End condition : R (0) == 0 x08 after six instructions
+243 " \ x31 \ x00 \ x39 \ x06 \ x30 \ x00 \ x7B \ x31 \ x0B \ x30 \ x00 \ x7A \ x39 \ x08 " ,
+244
+245 // 32: if D == 0 || 3 A : if D != 0
+246 // End condition : R (0) == 0 x0F after six instructions
+247 " \ xF8 \ x00 \ x32 \ x05 \ x00 \ xF8 \ x03 \ x3A \ x0A \ x00 \ xF8 \ x00 \ x32 \ x0F " ,
+248
+249 // 33: if DF == 1 || 3 B : if DF == 0
+250 // End condition : R (0) == 0 x0C after five instructions
+251 " \ x33 \ xFF \ x3B \ x05 \ x00 \ xF8 \ x01 \ x76 \ x33 \ x0C \ x30 \ xFE " ,
+252
+253 // 38: SKP
+254 // End condition : R (0) == 0 x02 after one instruction
+255 " \ x38 \ x00 \ x00 " ,
+256
+257 // 34 -37: branch if external flag N == 1
+258 // 3C -3 F : inverse
+259 // End conditions : R (0) == 0 x08 after two instructions
+260 " \ x3C \ xFF \ x34 \ x08 " ,
+261 " \ x3D \ xFF \ x35 \ x08 " ,
+262 " \ x3E \ xFF \ x36 \ x08 " ,
+263 " \ x3F \ xFF \ x37 \ x08 " ,
+264 " \ x34 \ xFF \ x3C \ x08 " ,
+265 " \ x35 \ xFF \ x3D \ x08 " ,
+266 " \ x36 \ xFF \ x3E \ x08 " ,
+267 " \ x37 \ xFF \ x3F \ x08 "
+268 };
+269
+270 const char * br_prog_names [13] = {
+271 " 30 BRANCH UNCOND " ,
+272 " 31 BQ + 39 BNQ " ,
+273 " 32 BZ + 3 A BNZ " ,
+274 " 33 BDF + 3 B BNF " ,
+275 " 38 SKP " ,
+276 " 34 B1 " ,
+277 " 35 B2 " ,
+278 " 36 B3 " ,
+279 " 37 B4 " ,
+280 " 3 C BN1 " ,
+281 " 3 D BN2 " ,
+282 " 3 E BN3 " ,
+283 " 3 F BN4 "
+284 };
+285
+286 int br_prog_instrs [13] = {2 , 6 , 6 , 5 , 1 , 2 , 2 , 2 , 2 , 2 , 2 , 2 , 2};
+287 static int br_prog_targets [13] = {0 x04 , 0 x08 , 0 x0F , 0 x0C , 0 x02 , 0 x08 , 0 x08 , 0 x08 , 0 x08 , 0 x08 , 0 x
+288
+289 struct ShortBranchTest1 {
+290 static void setup_3N_BR ( Vtp tb , void * data ) {
+291 size_t x = ( size_t ) data ;
+292
+293 if ( x >= 5 && x <= 8) {
+294 tb - > VCPU ( B_registers [ x - 5]) = 1;
+295 }
+296 else if ( x >= 9) {
+297 tb - > VCPU ( B_registers [ x - 9]) = 0;
+298 }
+299 }
+300
+301 static void verify_3N_BR ( CVtp tb , void * data ) {
+302 ASSERT ( tb - > VCPU ( R_registers [0]) == br_prog_targets [( size_t ) data ]);
+303 }
+304 };
+305
+306 for ( int x = 0; x < 13; x ++) {
+307 run_test ( tb ,
+308 br_prog_names [ x ] ,
+309 PROG ( br_test_progs1 [ x ]) ,
+310 br_prog_instrs [ x ] ,
+311 ShortBranchTest1 :: setup_3N_BR ,
+312 ShortBranchTest1 :: verify_3N_BR ,
+313 ( void *) x );
+314 }
+315
+316 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+317 // 40 -4 F ( LOAD & ADVANCE )
+318
+319 char lda_test_prog1 [] = " \ x40 \ xE0 \ x00 \ x00 \ x00 \ x40 \ x09 \ x00 \ x00 \ xE0 " ;
+320
+321 struct LoadAdvTest1 {
+322 static void setup_4N_LDA ( Vtp tb , void * data ) {
+323 size_t x = ( size_t ) data & 0 x0F ;
+324 if ( x != 0) {
+325 tb - > VCPU ( R_registers [ x ]) = 0 x09 ;
+326 }
+327 }
+328
+329 static void verify_4N_LDA ( CVtp tb , void * data ) {
+330 size_t x = ( size_t ) data & 0 x0F ;
+331 ASSERT ( tb - > VCPU ( D_register ) == 0 xE0 );
+332 ASSERT ( tb - > VCPU ( R_registers [ x ]) == ( x ? 0 x0A : 0 x02 ));
+333 }
+334 };
+335
+336 for ( int x = 0 x40 ; x <= 0 x4F ; x ++) {
+337 lda_test_prog1 [0] = lda_test_prog1 [5] = x ;
+338 sprintf ( buf , " %02 X LDA * R (% d ) -> D " , x , ( x & 0 x0F ));
+339 run_test ( tb , buf ,
+340 PROG ( lda_test_prog1 ) , 1 ,
+341 LoadAdvTest1 :: setup_4N_LDA ,
+342 LoadAdvTest1 :: verify_4N_LDA ,
+343 ( void *) x );
+344 }
+345
+346 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+347 // 50 -5 F ( STORE TO R ( N ))
+348
+349 char str_test_prog1 [] = " \ x50 \ x00 \ x00 \ x00 \ x00 \ x00 " ;
+350
+351 struct StoreTest1 {
+352 static void setup_5N_STR ( Vtp tb , void * data ) {
+353 tb - > VCPU ( D_register ) = 0 x2C ;
+354
+355 size_t x = ( size_t ) data & 0 x0F ;
+356 if ( x != 0) {
+357 tb - > VCPU ( R_registers [ x ]) = 0 x05 ;
+358 }
+359 }
+360
+361 static void verify_5N_STR ( CVtp tb , void * data ) {
+362 size_t x = ( size_t ) data & 0 x0F ;
+363 ASSERT ( tb - > VCPU ( D_register ) == 0 x2C );
+364 ASSERT ( tb - > pr oce ss or __D OT __m __ DO T__ me m [ x ? 5 : 1] == 0 x2C );
+365 }
+366 };
+367
+368 for ( int x = 0 x50 ; x <= 0 x5F ; x ++) {
+369 str_test_prog1 [0] = x ;
+370 sprintf ( buf , " %02 X STR D -> * R (% d ) " , x , ( x & 0 x0F ));
+371 run_test ( tb , buf ,
+372 PROG ( str_test_prog1 ) , 1 ,
+373 StoreTest1 :: setup_5N_STR ,
+374 StoreTest1 :: verify_5N_STR ,
+375 ( void *) x );
+376 }
+377
+378 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+379 // 60: INC R ( X )
+380
+381 struct IRXTest1 {
+382 static void setup_60_IRX ( Vtp tb , void * data ) {
+383 size_t x = ( size_t ) data & 0 x0F ;
+384 if ( x != 0) {
+385 tb - > VCPU ( R_registers [ x ]) = 0 xB9 ;
+386 }
+387 }
+388
+389 static void verify_60_IRX ( CVtp tb , void * data ) {
+390 size_t x = ( size_t ) data & 0 x0F ;
+391 ASSERT ( tb - > VCPU ( R_registers [ x ]) == x ? 0 xC0 : 0 x02 );
+392 }
+393 };
+394
+395 for ( int x = 0; x < 16; x ++) {
+396 char instr = 0 x60 ;
+397
+398 sprintf ( buf , " 60 IRX , X == % d " , x );
+399 run_test ( tb , buf ,
+400 & instr , 1 , 1 ,
+401 IRXTest1 :: setup_60_IRX ,
+402 IRXTest1 :: verify_60_IRX ,
+403 ( void *) x );
+404 }
+405
+406 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+407 // 61 -6 F ( BUS I / O )
+408 // TODO
+409
+410 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+411 // 70 -7 F ( CONTROL )
+412 // TODO
+413
+414 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+415 // 80 -8 F ( GLO )
+416
+417 struct GetLowTest1 {
+418 static void setup_8N_GLO ( Vtp tb , void * data ) {
+419 tb - > VCPU ( D_register ) = 0 xCC ;
+420
+421 size_t x = ( size_t ) data & 0 x0F ;
+422 if ( x != 0) {
+423 tb - > VCPU ( R_registers [ x ]) = 0 x2E74 ;
+424 }
+425 }
+426
+427 static void verify_8N_GLO ( CVtp tb , void * data ) {
+428 size_t x = ( size_t ) data & 0 x0F ;
+429 ASSERT ( tb - > VCPU ( D_register ) == ( x ? 0 x74 : 0 x01 ));
+430 }
+431 };
+432
+433 for ( unsigned char x = 0 x80 ; x <= 0 x8F ; x ++) {
+434 sprintf ( buf , " %02 X GLO R (% d ).0 -> D " , x , ( x & 0 x0F ));
+435 run_test ( tb , buf ,
+436 ( char *)& x , 1 , 1 ,
+437 GetLowTest1 :: setup_8N_GLO ,
+438 GetLowTest1 :: verify_8N_GLO ,
+439 ( void *) x );
+440 }
+441
+442 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+443 // 90 -9 F ( GHI )
+444
+445 struct GetHighTest1 {
+446 static void setup_9N_GHI ( Vtp tb , void * data ) {
+447 tb - > VCPU ( D_register ) = 0 xCC ;
+448
+449 size_t x = ( size_t ) data & 0 x0F ;
+450 if ( x != 0) {
+451 tb - > VCPU ( R_registers [ x ]) = 0 x2E74 ;
+452 }
+453 }
+454
+455 static void verify_9N_GHI ( CVtp tb , void * data ) {
+456 size_t x = ( size_t ) data & 0 x0F ;
+457 ASSERT ( tb - > VCPU ( D_register ) == ( x ? 0 x2E : 0 x00 ));
+458 }
+459 };
+460
+461 for ( unsigned char x = 0 x90 ; x <= 0 x9F ; x ++) {
+462 sprintf ( buf , " %02 X GHI R (% d ).1 -> D " , x , ( x & 0 x0F ));
+463 run_test ( tb , buf ,
+464 ( char *)& x , 1 , 1 ,
+465 GetHighTest1 :: setup_9N_GHI ,
+466 GetHighTest1 :: verify_9N_GHI ,
+467 ( void *) x );
+468 }
+469
+470 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+471 // A0 - AF ( PLO )
+472
+473 struct PutLowTest1 {
+474 static void setup_AN_PLO ( Vtp tb , void * data ) {
+475 size_t x = ( size_t ) data & 0 x0F ;
+476 tb - > VCPU ( D_register ) = 0 xCB ;
+477 tb - > VCPU ( R_registers [ x ]) = 0 x0000 ;
+478 }
+479
+480 static void verify_AN_PLO ( CVtp tb , void * data ) {
+481 size_t x = ( size_t ) data & 0 x0F ;
+482 ASSERT ( tb - > VCPU ( R_registers [ x ]) == 0 x00CB );
+483 }
+484 };
+485
+486 for ( unsigned char x = 0 xA0 ; x <= 0 xAF ; x ++) {
+487 sprintf ( buf , " %02 X PLO D -> R (% d ).0 " , x , ( x & 0 x0F ));
+488 run_test ( tb , buf ,
+489 ( char *)& x , 1 , 1 ,
+490 PutLowTest1 :: setup_AN_PLO ,
+491 PutLowTest1 :: verify_AN_PLO ,
+492 ( void *) x );
+493 }
+494
+495 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+496 // B0 - BF ( PHI )
+497
+498 struct PutHighTest1 {
+499 static void setup_BN_PHI ( Vtp tb , void * data ) {
+500 size_t x = ( size_t ) data & 0 x0F ;
+501 tb - > VCPU ( D_register ) = 0 xCB ;
+502 tb - > VCPU ( R_registers [ x ]) = 0 x0000 ;
+503 }
+504
+505 static void verify_BN_PHI ( CVtp tb , void * data ) {
+506 size_t x = ( size_t ) data & 0 x0F ;
+507 ASSERT ( tb - > VCPU ( R_registers [ x ]) == ( x ? 0 xCB00 : 0 xCB01 ));
+508 }
+509 };
+510
+511 for ( unsigned char x = 0 xB0 ; x <= 0 xBF ; x ++) {
+512 sprintf ( buf , " %02 X PHI D -> R (% d ).1 " , x , ( x & 0 x0F ));
+513 run_test ( tb , buf ,
+514 ( char *)& x , 1 , 1 ,
+515 PutHighTest1 :: setup_BN_PHI ,
+516 PutHighTest1 :: verify_BN_PHI ,
+517 ( void *) x );
+518 }
+519
+520 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+521 // C0 - CF ( LONG BRANCH )
+522
+523 // ////////////////// Branches \\\\\\\\\\\\\\\\\\\\
+524 // C0 : unconditional long branch
+525 char lbr_test_prog1 [] = " \ xC0 \ x34 \ x56 " ;
+526
+527 struct LBRTest {
+528 static void verify_taken ( CVtp tb , void * data ) {
+529 ASSERT ( tb - > VCPU ( R_registers [0]) == 0 x3456 );
+530 }
+531
+532 static void verify_not_taken ( CVtp tb , void * data ) {
+533 ASSERT ( tb - > VCPU ( R_registers [0]) == 0 x03 );
+534 }
+535 };
+536
+537 run_basic_test ( tb , " C0 LBR NOCOND " , PROG ( lbr_test_prog1 ) , 1 , LBRTest :: verify_taken , NULL );
+538
+539 // C1 : LBQ ( Q == 1)
+540 // C9 : LBNQ ( Q == 0)
+541 char lbq_test_prog1 [] = " \ xC1 \ x34 \ x56 " ;
+542 char lbq_test_prog2 [] = " \ xC9 \ x34 \ x56 " ;
+543
+544 struct LBQTest {
+545 static void setup_C1C9_LBQ ( Vtp tb , void * data ) { tb - > VCPU ( Q ) = 1; }
+546 static void setup_C1C9_LBNQ ( Vtp tb , void * data ) { tb - > VCPU ( Q ) = 0; }
+547 };
+548
+549 run_test ( tb , " C1 LBQ Q ==0 " , PROG ( lbq_test_prog1 ) , 1 ,
+550 LBQTest :: setup_C1C9_LBNQ , LBRTest :: verify_not_taken , NULL );
+551 run_test ( tb , " C1 LBQ Q ==1 " , PROG ( lbq_test_prog1 ) , 1 ,
+552 LBQTest :: setup_C1C9_LBQ , LBRTest :: verify_taken , NULL );
+553 run_test ( tb , " C9 LBNQ Q ==0 " , PROG ( lbq_test_prog2 ) , 1 ,
+554 LBQTest :: setup_C1C9_LBNQ , LBRTest :: verify_taken , NULL );
+555 run_test ( tb , " C9 LBNQ Q ==1 " , PROG ( lbq_test_prog2 ) , 1 ,
+556 LBQTest :: setup_C1C9_LBQ , LBRTest :: verify_not_taken , NULL );
+557
+558 // C2 : LBZ ( D == 0)
+559 // CA : LBNZ ( D != 0)
+560 char lbz_test_prog1 [] = " \ xC2 \ x34 \ x56 " ;
+561 char lbz_test_prog2 [] = " \ xCA \ x34 \ x56 " ;
+562
+563 struct LBZTest {
+564 static void setup_C2CA_LBZ ( Vtp tb , void * data ) { tb - > VCPU ( D_register ) = 0; }
+565 static void setup_C2CA_LBNZ ( Vtp tb , void * data ) { tb - > VCPU ( D_register ) = 0 xFE ; }
+566 };
+567
+568 run_test ( tb , " C2 LBZ D ==0 " , PROG ( lbz_test_prog1 ) , 1 ,
+569 LBZTest :: setup_C2CA_LBZ , LBRTest :: verify_taken , NULL );
+570 run_test ( tb , " C2 LBZ D ==1 " , PROG ( lbz_test_prog1 ) , 1 ,
+571 LBZTest :: setup_C2CA_LBNZ , LBRTest :: verify_not_taken , NULL );
+572 run_test ( tb , " CA LBNZ D ==0 " , PROG ( lbz_test_prog2 ) , 1 ,
+573 LBZTest :: setup_C2CA_LBZ , LBRTest :: verify_not_taken , NULL );
+574 run_test ( tb , " CA LBNZ D ==1 " , PROG ( lbz_test_prog2 ) , 1 ,
+575 LBZTest :: setup_C2CA_LBNZ , LBRTest :: verify_taken , NULL );
+576
+577 // C3 : LBDF ( DF == 1)
+578 // CB : LBNF ( DF == 0)
+579 char lbdf_test_prog1 [] = " \ xC3 \ x34 \ x56 " ;
+580 char lbdf_test_prog2 [] = " \ xCB \ x34 \ x56 " ;
+581
+582 struct LBDFTest {
+583 static void setup_C3CB_LBDF ( Vtp tb , void * data ) { tb - > VCPU ( DF ) = 1; }
+584 static void setup_C3CB_LBNF ( Vtp tb , void * data ) { tb - > VCPU ( DF ) = 0; }
+585 };
+586
+587 run_test ( tb , " C3 LBDF D ==0 " , PROG ( lbdf_test_prog1 ) , 1 ,
+588 LBDFTest :: setup_C3CB_LBDF , LBRTest :: verify_taken , NULL );
+589 run_test ( tb , " C3 LBDF D ==1 " , PROG ( lbdf_test_prog1 ) , 1 ,
+590 LBDFTest :: setup_C3CB_LBNF , LBRTest :: verify_not_taken , NULL );
+591 run_test ( tb , " CB LBNF D ==0 " , PROG ( lbdf_test_prog2 ) , 1 ,
+592 LBDFTest :: setup_C3CB_LBNF , LBRTest :: verify_taken , NULL );
+593 run_test ( tb , " CB LBNF D ==1 " , PROG ( lbdf_test_prog2 ) , 1 ,
+594 LBDFTest :: setup_C3CB_LBDF , LBRTest :: verify_not_taken , NULL );
+595
+596 // C4 : NOP
+597 char nop_test_prog1 [] = " \ xC4 \ xC4 \ xC4 " ;
+598 Vprocessor old_state ;
+599
+600 struct NOPTest {
+601 static void setup_C4_NOP ( Vtp tb , void * data ) {
+602 memcpy ( data , tb , sizeof ( Vprocessor ));
+603 }
+604
+605 static void verify_C4_NOP ( CVtp tb , void * data ) {
+606 Vprocessor * old = ( Vprocessor *) data ;
+607 old - > VCPU ( R_registers [0]) += 3 + 1; // + 1 since FETCH will increase PC
+608
+609 ASSERT ( memcmp ( old - > processor__DOT__m__DOT__mem ,
+610 tb - > processor__DOT__m__DOT__mem ,
+611 sizeof ( tb - > pr oce ss or_ _D OT __m __ DO T__ me m )) == 0);
+612
+613 ASSERT ( memcmp ( old - > VCPU ( R_registers ) ,
+614 tb - > VCPU ( R_registers ) ,
+615 sizeof ( tb - > VCPU ( R_registers ))) == 0);
+616
+617 ASSERT ( memcmp ( old - > VCPU ( B_registers ) ,
+618 tb - > VCPU ( B_registers ) ,
+619 sizeof ( tb - > VCPU ( B_registers ))) == 0);
+620
+621 ASSERT ( old - > VCPU ( mode ) == tb - > VCPU ( mode ));
+622 ASSERT ( old - > VCPU ( state ) == tb - > VCPU ( state ));
+623 ASSERT ( old - > VCPU ( alu_operand ) == tb - > VCPU ( alu_operand ));
+624 ASSERT ( old - > VCPU ( alu_result ) == tb - > VCPU ( alu_result ));
+625 ASSERT ( old - > VCPU ( alu_carry ) == tb - > VCPU ( alu_carry ));
+626 ASSERT ( old - > VCPU ( Q ) == tb - > VCPU ( Q ));
+627 ASSERT ( old - > VCPU ( DF ) == tb - > VCPU ( DF ));
+628 ASSERT ( old - > VCPU ( IE ) == tb - > VCPU ( IE ));
+629 ASSERT ( old - > VCPU ( N_register ) == tb - > VCPU ( N_register ));
+630 ASSERT ( old - > VCPU ( P_register ) == tb - > VCPU ( P_register ));
+631 ASSERT ( old - > VCPU ( X_register ) == tb - > VCPU ( X_register ));
+632 ASSERT ( old - > VCPU ( I_register ) == tb - > VCPU ( I_register ));
+633 ASSERT ( old - > VCPU ( D_register ) == tb - > VCPU ( D_register ));
+634 }
+635 };
+636
+637 run_test ( tb , " C4 NOP " , NBRANCH_PROG ( nop_test_prog1 ) ,
+638 NOPTest :: setup_C4_NOP , NOPTest :: verify_C4_NOP , & old_state );
+639
+640 // ////////////////// Long skips \\\\\\\\\\\\\\\\\\\\
+641 // C5 : LNQ ( Q == 0)
+642 // CD : LSQ ( Q == 1)
+643 struct LSKPTest {
+644 static void verify_taken ( CVtp tb , void *) {
+645 ASSERT ( tb - > VCPU ( R_registers [0]) == 0 x03 );
+646 }
+647
+648 static void verify_not_taken ( CVtp tb , void *) {
+649 ASSERT ( tb - > VCPU ( R_registers [0]) == 0 x01 );
+650 }
+651 };
+652
+653 char lnq_test_prog1 = 0 xC5 ;
+654 char lsq_test_prog1 = 0 xCD ;
+655
+656 struct LNQTest {
+657 static void setup_C5CD_LNQ ( Vtp tb , void *) { tb - > VCPU ( Q ) = 0; }
+658 static void setup_C5CD_LSQ ( Vtp tb , void *) { tb - > VCPU ( Q ) = 1; }
+659 };
+660
+661 run_test ( tb , " C5 LNQ Q ==0 " , & lnq_test_prog1 , 1 , 1 ,
+662 LNQTest :: setup_C5CD_LNQ , LSKPTest :: verify_taken , NULL );
+663 run_test ( tb , " C5 LNQ Q ==1 " , & lnq_test_prog1 , 1 , 1 ,
+664 LNQTest :: setup_C5CD_LSQ , LSKPTest :: verify_not_taken , NULL );
+665 run_test ( tb , " CD LSQ Q ==0 " , & lsq_test_prog1 , 1 , 1 ,
+666 LNQTest :: setup_C5CD_LNQ , LSKPTest :: verify_not_taken , NULL );
+667 run_test ( tb , " CD LSQ Q ==1 " , & lsq_test_prog1 , 1 , 1 ,
+668 LNQTest :: setup_C5CD_LSQ , LSKPTest :: verify_taken , NULL );
+669
+670 // C6 : LSNZ ( D != 0)
+671 // CE : LSZ ( D == 0)
+672 char lsnz_test_prog1 = 0 xC6 ;
+673 char lsz_test_prog1 = 0 xCE ;
+674
+675 struct LSNZTest {
+676 static void setup_C6CE_LSNZ ( Vtp tb , void *) { tb - > VCPU ( D_register ) = 0 x65 ; }
+677 static void setup_C6CE_LSZ ( Vtp tb , void *) { tb - > VCPU ( D_register ) = 0; }
+678 };
+679
+680 run_test ( tb , " C6 LSNZ D !=0 " , & lsnz_test_prog1 , 1 , 1 ,
+681 LSNZTest :: setup_C6CE_LSNZ , LSKPTest :: verify_taken , NULL );
+682 run_test ( tb , " C6 LSNZ D ==0 " , & lsnz_test_prog1 , 1 , 1 ,
+683 LSNZTest :: setup_C6CE_LSZ , LSKPTest :: verify_not_taken , NULL );
+684 run_test ( tb , " CE LSZ D !=0 " , & lsz_test_prog1 , 1 , 1 ,
+685 LSNZTest :: setup_C6CE_LSNZ , LSKPTest :: verify_not_taken , NULL );
+686 run_test ( tb , " CE LSZ D ==0 " , & lsz_test_prog1 , 1 , 1 ,
+687 LSNZTest :: setup_C6CE_LSZ , LSKPTest :: verify_taken , NULL );
+688
+689 // C7 : LSNF ( DF == 0)
+690 // CF : LSDF ( DF == 1)
+691 char lsnf_test_prog1 = 0 xC7 ;
+692 char lsdf_test_prog1 = 0 xCF ;
+693
+694 struct LSNFTest {
+695 static void setup_C7CF_LSNF ( Vtp tb , void *) { tb - > VCPU ( DF ) = 0; }
+696 static void setup_C7CF_LSDF ( Vtp tb , void *) { tb - > VCPU ( DF ) = 1; }
+697 };
+698
+699 run_test ( tb , " C7 LSNF DF ==0 " , & lsnf_test_prog1 , 1 , 1 ,
+700 LSNFTest :: setup_C7CF_LSNF , LSKPTest :: verify_taken , NULL );
+701 run_test ( tb , " C7 LSNF DF ==1 " , & lsnf_test_prog1 , 1 , 1 ,
+702 LSNFTest :: setup_C7CF_LSDF , LSKPTest :: verify_not_taken , NULL );
+703 run_test ( tb , " CF LSDF DF ==0 " , & lsdf_test_prog1 , 1 , 1 ,
+704 LSNFTest :: setup_C7CF_LSNF , LSKPTest :: verify_not_taken , NULL );
+705 run_test ( tb , " CF LSDF DF ==1 " , & lsdf_test_prog1 , 1 , 1 ,
+706 LSNFTest :: setup_C7CF_LSDF , LSKPTest :: verify_taken , NULL );
+707
+708 // C8 : NLBR ( uncond . long skip )
+709 char nlbr_test_prog1 = 0 xC8 ;
+710
+711 run_basic_test ( tb , " C8 NLBR uncond . long skip " , & nlbr_test_prog1 , 1 , 1 ,
+712 LSKPTest :: verify_taken , NULL );
+713
+714 // CC : LSIE ( IE == 1)
+715 char lsie_test_prog1 = 0 xCC ;
+716
+717 struct LSIETest {
+718 static void setup_CC_POS ( Vtp tb , void *) { tb - > VCPU ( IE ) = 1; }
+719 static void setup_CC_NEG ( Vtp tb , void *) { tb - > VCPU ( IE ) = 0; }
+720 };
+721
+722 run_test ( tb , " CC LSIE IE ==0 " , & lsie_test_prog1 , 1 , 1 ,
+723 LSIETest :: setup_CC_NEG , LSKPTest :: verify_not_taken , NULL );
+724 run_test ( tb , " CC LSIE IE ==1 " , & lsie_test_prog1 , 1 , 1 ,
+725 LSIETest :: setup_CC_POS , LSKPTest :: verify_taken , NULL );
+726
+727 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+728 // D0 - DF ( SET P TO N )
+729
+730 struct SetPTest1 {
+731 static void verify_DN_SEP ( CVtp tb , void * data ) {
+732 ASSERT ( tb - > VCPU ( P_register ) == ( size_t ) data );
+733 }
+734 };
+735
+736 for ( unsigned char x = 0 xD0 ; x <= 0 xDF ; x ++) {
+737 sprintf ( buf , " %02 X SEP " , x );
+738 run_basic_test ( tb , buf , ( char *)& x , 1 , 1 , SetPTest1 :: verify_DN_SEP , ( void *)( x & 0 x0F ));
+739 }
+740
+741 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+742 // E0 - EF ( SET X TO N )
+743
+744 struct SetXTest1 {
+745 static void verify_EN_SEX ( CVtp tb , void * data ) {
+746 ASSERT ( tb - > VCPU ( X_register ) == ( size_t ) data );
+747 }
+748 };
+749
+750 for ( unsigned char x = 0 xE0 ; x <= 0 xEF ; x ++) {
+751 sprintf ( buf , " %02 X SEX " , x );
+752 run_basic_test ( tb , buf , ( char *)& x , 1 , 1 , SetXTest1 :: verify_EN_SEX , ( void *)( x & 0 x0F ));
+753 }
+754
+755 // / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
+756 // F0 - FF ( ARITH )
+757
+758 // F0 : load via X
+759 // TODO
+760
+761 // F1 - FF : OR via X
+762 char arith_via_x_test_prog1 [] = " \ xF1 \ x54 " ;
+763
+764 struct ArithViaXTest {
+765 static void setup_FN_arith ( Vtp tb , void * data ) {
+766 tb - > VCPU ( D_register ) = 0 xC1 ;
+767
+768 size_t x = ( size_t ) data & 0 x0F ;
+769 if ( x != 0) {
+770 tb - > VCPU ( R_registers [ x ]) = 0 x01 ;
+771 }
+772 }
+773
+774 static void verify_IMM ( CVtp tb , void * data ) {
+775 size_t x = ( size_t ) data ;
+776 if ( x > 0 xF8 && x != 0 xFE ) {
+777 ASSERT ( tb - > VCPU ( R_registers [0]) == 0 x03 );
+778 }
+779 }
+780
+781 static void verify_OR ( CVtp tb , void * data ) {
+782 ASSERT ( tb - > VCPU ( D_register ) == 0 xD5 );
+783 verify_IMM ( tb , data );
+784 }
+785
+786 static void verify_AND ( CVtp tb , void * data ) {
+787 ASSERT ( tb - > VCPU ( D_register ) == 0 x40 );
+788 verify_IMM ( tb , data );
+789 }
+790
+791 static void verify_XOR ( CVtp tb , void * data ) {
+792 ASSERT ( tb - > VCPU ( D_register ) == 0 x95 );
+793 verify_IMM ( tb , data );
+794 }
+795
+796 static void verify_ADD ( CVtp tb , void * data ) {
+797 ASSERT ( tb - > VCPU ( D_register ) == 0 x15 );
+798 ASSERT ( tb - > VCPU ( DF ) == 1);
+799 verify_IMM ( tb , data );
+800 }
+801
+802 static void verify_SUB ( CVtp tb , void * data ) {
+803 ASSERT ( tb - > VCPU ( D_register ) == 0 x93 );
+804 ASSERT ( tb - > VCPU ( DF ) == 0);
+805 verify_IMM ( tb , data );
+806 }
+807
+808 static void verify_SHR ( CVtp tb , void * data ) {
+809 ASSERT ( tb - > VCPU ( D_register ) == 0 x60 );
+810 ASSERT ( tb - > VCPU ( DF ) == 1);
+811 }
+812
+813 static void verify_SHL ( CVtp tb , void * data ) {
+814 ASSERT ( tb - > VCPU ( D_register ) == 0 x82 );
+815 ASSERT ( tb - > VCPU ( DF ) == 1);
+816 }
+817
+818 static void verify_mem_SUB ( CVtp tb , void * data ) {
+819 ASSERT ( tb - > VCPU ( D_register ) == 0 x6D );
+820 ASSERT ( tb - > VCPU ( DF ) == 1);
+821 verify_IMM ( tb , data );
+822 }
+823
+824 // TODO : F8 ( LDI )
+825 };
+826
+827 const char * arith_via_x_names [16] = {
+828 NULL , " OR " , " AND " , " XOR " , " ADD " , " SD " , " SHR " , " SM " ,
+829 NULL , " ORI " , " ANI " , " XRI " , " ADI " , " SDI " , " SHL " , " SMI "
+830 };
+831
+832 for ( unsigned char x = 0 xF1 ; ; x ++) {
+833 if ( x == 0 xF8 ) continue ;
+834
+835 arith_via_x_test_prog1 [0] = x ;
+836 void (* verifier )( CVtp , void *) = NULL ;
+837
+838 switch ( x & 0 x07 ) {
+839 case 0 x01 :
+840 verifier = ArithViaXTest :: verify_OR ;
+841 break ;
+842 case 0 x02 :
+843 verifier = ArithViaXTest :: verify_AND ;
+56
+844 break ;
+845 case 0 x03 :
+846 verifier = ArithViaXTest :: verify_XOR ;
+847 break ;
+848 case 0 x04 :
+849 verifier = ArithViaXTest :: verify_ADD ;
+850 break ;
+851 case 0 x05 :
+852 verifier = ArithViaXTest :: verify_SUB ;
+853 break ;
+854 case 0 x06 :
+855 if ( x == 0 xF6 ) verifier = ArithViaXTest :: verify_SHR ;
+856 else verifier = ArithViaXTest :: verify_SHL ;
+857 break ;
+858 case 0 x07 :
+859 verifier = ArithViaXTest :: verify_mem_SUB ;
+860 break ;
+861 }
+862
+863 sprintf ( buf , " %02 X % s " , x , arith_via_x_names [ x & 0 x0F ]);
+864 run_test ( tb , buf , PROG ( arith_via_x_test_prog1 ) , 1 ,
+865 ArithViaXTest :: setup_FN_arith , verifier , NULL );
+866
+867 if ( x == 0 xFF ) break ;
+868 }
+869
+870 return 0;
+871 }
+

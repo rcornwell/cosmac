@@ -1,0 +1,592 @@
+next:
+
+      idle = (I == 0) & (N == 0)
+      S0:
+          if !wait & !clear & dma
+              S2
+              
+          if wait & !clear & !dma
+              S0
+
+          if !clear & wait
+              I=N=Q = 0 IE = 1
+           
+              
+      S1:
+          if !idle & !dma & !int
+              S0
+          if idle & !dma & !int
+              S1
+
+          if !dma & (int & IE)
+              S3
+
+          if dma
+              S2
+
+      S2:
+          if dma
+              S2
+          if !dma
+              S0
+
+      S3:
+          if dma
+              S2
+          if !dma & (int & IE)
+              S3
+              
+S2:
+      Address R(0)
+      select increment
+      if DMAIN read cycle
+      if DMAout write cycle
+      update register
+
+S3:
+      Address R(N)
+      T = X,P
+      I = 0
+      X = 2
+      P = 1
+      next
+
+S0:
+      Address R(P)
+      Select increment.
+      if (I != 0 || N != 0) {
+         Read cycle.
+         I < bus<7:4>
+         N < bus<3:0>
+         update P
+      }
+      next execute;
+
+S1:
+     reset
+       X = 0
+       P = 0
+       Reg R(P) = 0
+
+     I == 0:    // LDN
+       Address R(N)
+       read cycle.
+       if (N != 0)
+          D < bus.
+       next fetch;
+
+    I == 1:      // INC
+       Address R(N)
+       select increment.
+       update N.
+       bus = float;
+       next fetch;
+
+    I == 2:    // DEC
+       Address R(N)
+       select decrement.
+       update N.
+       bus = float;
+       next fetch;
+
+    I == 3:  // Bxx
+       Address R(P)
+       select increment.
+       read cycle.
+       cond = N<3> ^ select<N<2:0>, 1 Q D = 0 DF EF1 EF2 EF3 EF4>
+       update P.
+       if (flag) {
+           P.0 < bus.
+       } else {
+           P.0 = increment.
+       }
+       P.1 = increment.
+       next fetch;
+
+     I == 4:     // LDA
+       Address R(N)
+       select increment.
+       read cycle.
+       D = bus.
+       update N.
+       next fetch;
+
+     I == 5:    // STR
+       Address R(N)
+       write cycle.
+       bus = D;
+       next fetch;
+
+    I == 6:   // IRX, INP, OUT
+       Address R(X)   
+       SC = N<2:0>
+       bus float
+       if (N<3>) {
+           write cycle;
+       } else {
+           select increment.
+           read cycle;
+       }
+       update X
+       next fetch;
+
+    I == 7:
+       N == 0, 1:  // RET, DIS
+          Address = R(X)
+          select increment.
+          read cycle
+          X = bus<7:4>
+          P = bus<3:0>
+          I = N<0>
+          update X
+          next fetch;
+           
+       N == 2:      // LDXA
+          Address = R(X)
+          select increment.
+          read cycle
+          D = bus
+          update X
+          next fetch;
+           
+       N == 3:     // STXD
+          Address = R(X)
+          select decrement.
+          write cycle
+          bus = D
+          update X
+          next fetch;
+          
+       N == 4:   // ADC
+          Address = R(X);
+          read cycle
+          D = bus + D + DF
+          next fetch;
+
+       N == 5:   // SDB
+          Address = R(X);
+          read cycle
+          D = bus  + ~D + !DF
+          next fetch;
+ 
+       N == 6:  // SHRC
+          Address = R(X);
+          bus = float
+          DF = D<0>
+          D = DF:D<7:1>
+          next fetch;
+ 
+       N == 7:   // SMB
+          Address = R(X);
+          read cycle
+          D = ~bus  + D + !DF
+          next fetch;
+ 
+       N == 8:   // SAV
+          Address = R(X)
+          bus = T
+          write cycle
+          next fetch
+ 
+       N == 9:   // MARK
+          Address = R(2)
+          select decrement
+          T = X:P;
+          bus = T
+          write cycle
+          update D
+          X = P
+          next fetch
+ 
+       N == A:   // REQ
+          Address = R(P)
+          float bus
+          Q = 0
+          next fetch
+ 
+       N == B:   // SEQ
+          Address = R(P)
+          float bus
+          Q = 0
+          next fetch
+ 
+       N == c:    // ADCI
+          Address = R(P);
+          increment
+          read cycle
+          D = bus  + D + DF
+          update P
+          next fetch;
+
+       N == d:    // SDBI
+          Address = R(P);
+          increment
+          read cycle
+          D = bus  + ~D + !DF
+          update P
+          next fetch;
+ 
+       N == e:   // SHLC
+          Address = R(p);
+          bus = float
+          DF = D<7>
+          D = D<6:0>:DF
+          next fetch;
+ 
+       N == f:   // SMBI
+          Address = R(P);
+          increment
+          read cycle
+          D = ~bus  + D + !DF
+          update P
+          next fetch;
+
+    I == 8:    // GLO
+       Address R(N)
+       bus = R(N).0;
+       D = bus
+       next fetch;
+
+    I == 9:    // GHI
+       Address R(N)
+       bus = R(N).1;
+       D = bus
+       next fetch;
+
+    I == A:    // PLO
+       Address R(N)
+       bus = D
+       R(N).0 = bus;
+       R(N).1 = R(N).1
+       update register N.
+       next fetch;
+
+    I == B:   // PHI
+       Address R(N)
+       bus = D
+       R(N).1 = bus;
+       R(N).0 = R(N).0
+       update register N.
+       next fetch;
+
+    I == D:  // SEP
+       Address R(N)
+       bus = N, N
+       update register N.
+       P = N
+       next fetch;
+
+    I == E:   // SEX
+       Address R(N)
+       bus = N, N
+       update register N.
+       X = N
+       next fetch;
+
+
+    I = C:  // LBR, LSKP
+        cond = <(I & N<3> & N<2>) | (!N<3>|!N<2>) , Q, D!= 0, DF>^N<3>^N<2>
+        Address R(P)
+        select increment
+        read cycle
+        temp = bus
+        if cond || !(N<3>|N<2>)
+            update register
+        next S1.2
+
+        S1.2
+        Address R(P)
+        select increment
+        read cycle
+        if !(N<3> | N<2>) {
+            if cond 
+                reg = T:bus
+            else 
+                update register
+        } else {
+            if cond
+               update register
+        next fetch
+          
+    I == F:
+         N == 0:      // LDX
+           select register R(X)
+           read cycle
+           B = bus
+           D = B
+           next fetch
+
+         N == 1:      // OR
+           select register R(X)
+           read cycle
+           B = bus
+           D = D | B;
+           next fetch
+
+         N == 2:     // AND
+           select register R(X)
+           read cycle
+           B = bus
+           D = D & B;
+           next fetch
+
+         N == 3:     // XOR
+           select register R(X)
+           read cycle
+           B = bus
+           D = D ^ B;
+           next fetch
+
+       N == 4:     // ADD
+          Address = R(X);
+          read cycle
+          B = bus 
+          D = B + D + 0
+          next fetch;
+
+       N == 5:      // SD
+          Address = R(X);
+          read cycle
+          B = bus 
+          D = B + ~D + !0
+          next fetch;
+ 
+       N == 6:     // SHR
+          Address = R(X);
+          bus = float
+          DF = D<0>
+          D = 0:D<7:1>
+          next fetch;
+ 
+       N == 7:    // SM
+          Address = R(X);
+          read cycle
+          B = bus 
+          D = ~B + D + !0
+          next fetch;
+
+         N == 8:    // LDI
+           select register R(P)
+           read cycle
+           B = bus
+           D = B
+           update register
+           next fetch
+
+         N == 9:   // ORI
+           select register R(P)
+           read cycle
+           B = bus
+           D = D | B;
+           update register
+           next fetch
+
+         N == a:   // ANI
+           select register R(P)
+           read cycle
+           B = bus
+           D = D & B;
+           update register
+           next fetch
+
+         N == b:    // XORI
+           select register R(P)
+           read cycle
+           B = bus
+           D = D ^ B;
+           update register
+           next fetch
+
+       N == c:     // ADI
+          Address = R(P);
+          read cycle
+          B = bus 
+          D = B + D + 0
+           update register
+          next fetch;
+
+       N == d:    // SDI
+          Address = R(P);
+          read cycle
+          B = bus 
+          D = B + ~D + !0
+           update register
+          next fetch;
+ 
+       N == e:     // SHL
+          Address = R(P);
+          bus = float
+          DF = D<7>
+          D = D<6:0>:0
+          next fetch;
+ 
+       N == f:    // SMI
+          Address = R(P);
+          read cycle
+          B = bus 
+          D = ~B + D + !0
+           update register
+          next fetch;
+
+                     MA         Read   Write
+   Clock 0           RP(x).1
+         1   TPA     RP(x).1    L
+         2           RP(x).0    L
+         3           RP(x).0    L
+         4           RP(x).0    L
+         5           RP(x).0    L      L
+         6           RP(x).0    L      L
+         7   TPB     RP(x).0    L      L
+}
+
+   R(x)  = N,P,X,2,0
+   bus   = D,T,N:N,R(x).0,R(x).1,0
+   D     = bus, alu, alu<right>, alu<left>
+   A     = D,~D
+   B     = bus,~bus,0
+   X     = P,bus<7:4>
+   P     = bus<7:4>
+   T     = X:P
+
+   R(x).0  bus,increment
+   R(x).1  bus,increment
+
+   S1
+
+         I N       R(x)    Bus MA  R  W  inc ldx0 ldx1  ldD alu A  B    cin  ldDF ldX  ldP    ldT
+   LDN   0          N      in      x      ?   n    n    bus  ?                    
+   INC   1          N      float          +   inc  inc       ?                    
+   DEC   2          N      float          -   inc  inc       ?                    
+   B??   3          P      in      x      +   inc  ?         ?                    
+   LDA   4          N      in      x      +   inc  inc  bus  ?                    
+   STR   5          N      D          x   ?   n    n         ?                    
+   OUT   6 0xxx     X      float   x      +   inc  inc                            
+   INP   6 1xxx     X      float      x   ?   n    n                              
+   RET   7 0        X      in      x      +   inc  inc                             bus  bus
+   DIS   7 1        X      in      x      +   inc  inc       or                    bus  bus
+   LDXA  7 2        X      in      x      +   inc  inc  bus  and                  
+   STXD  7 3        X      D          x   -   inc  inc       xor                  
+   ADC   7 4        X      in     x           n    n    alu  +  D   bus   DF  cout
+   SDB   7 5        X      in     x           n    n    alu  + ~D   bus  ~DF  cout
+   SHRC  7 6        X      in                 n    n   right +  D   bus       Alu 0
+   SMB   7 7        X      in     x           n    n    alu  +  D  ~bus  ~DF  cout
+   SAV   7 8        X      T          x       n    n                              
+   MARK  7 9        2      T          x   -   inc  inc       or                    P    y     P,X
+   REQ   7 A        P      in                 n    n         and                              Q<-0
+   SEQ   7 B        P      in                 n    n         xor                              Q<-1
+   ADCI  7 C        P      in     x           inc  inc  alu  +  D   bus   DF  cout
+   SDBI  7 D        P      in     x           inc  inc  alu  + ~D   bus  ~DF  cout
+   SHLC  7 E        P      in                 n    n   left  +  D   bus       alu 7
+   SMBI  7 F        P      in     x           inc  inc  alu  +  D  ~bus  ~DF  cout
+   GLO   8          N      R(N).0         ?   n    n    bus
+   GHI   9          N      R(N).1         ?   n    n    bus
+   PLO   A          N      D              ?  bus   n            D   
+   PHI   B          N      D              ?   n   bus           D   
+   lbr   C          P      in     x           n    n
+   SEP   D          N     N,N                 n    n                               bus
+   SEX   E          N     N,N                 n    n                                    bus
+   LDX   F 0        X      in     x           n    n    bus  
+   OR    F 1        X      in     x           n    n    alu or  D   bus
+   AND   F 2        X      in     x           n    n    alu and D   bus
+   XOR   F 3        X      in     x           n    n    alu xor D   bus
+   ADD   F 4        X      in     x           n    n    alu  +  D   bus   0   cout
+   SD    F 5        X      in     x           n    n    alu  + ~D   bus  ~0   cout
+   SHR   F 6        X      in                 n    n   right +  D   bus       alu 0
+   SM    F 7        X      in     x           n    n    alu  +  D  ~bus  ~0   cout
+   LDI   F 8        P      in     x        +  inc  inc  bus  
+   ORI   F 9        P      in     x        +  inc  inc  alu or  D   bus
+   ANI   F A        P      in     x        +  inc  inc  alu and D   bus
+   XORI  F B        P      in     x        +  inc  inc  alu xor D   bus
+   ADDI  7 C        P      in     x        +  inc  inc  alu  +  D   bus   0   cout
+   SDI   7 D        P      in     x        +  inc  inc  alu  + ~D   bus  ~0   cout
+   SHL   7 E        P      in              +  n    n   left  +  D   bus       alu 7
+   SMI   7 F        P      in     x        +  inc  inc  alu  +  D  ~bus  ~0   cout
+       
+         S0        P       in     x        +  y                                     ld I,N
+         S2        0       in     x   x    +  y
+         S3        N       in                 n                              2  1   X,P
+   reset      0       0                 bus                             0  0
+
+
+                 00 0/2    000 -       00 -
+                 01 N      001 N,N     01 -
+                 10 X      010 R(N).0  10 Tw
+                 11 P      011 R(N).1  11 Dw
+
+      Address N I = 0,1,2,4,8,9,A,B,D
+              P I = 3, 7(N>9),C, F(N>7)
+              X I = 6, 7(N<9), F(N<8)
+              2 I = 7, N=9
+              0 dma
+
+      read    I = 0, 3, 6(!N<3>), C, F
+      write   I = 5, 6(N<3>)
+
+      increment I= 1, 3, 4, 6(!N<3>), C
+      decrement I = 2
+
+      update R(x) I=1,2,3,4, 6(!N<3>), C(cond)
+      update R(x).0 I=A
+      update R(x).1 I=B
+
+      set D < Bus I = 0, 4, 8, 9
+      Bus < D I=5, A, B
+      Bus < R(x).0 I= 8
+      Bus < R(x).1 I= 9
+      Bus < N,N   I=D, E
+
+     Alu Op
+     I == 0, 4, 8, 9:
+         Pass, bus
+     I == 1, 2, 3, 5, 6, 9, A, B, D, E, C:
+         Pass, D
+
+    I == 7:
+       N == 0, 1, 8, 9, A, B:
+           Pass, D
+       N == 2:
+           Pass, bus
+       N == 3:
+           Pass, D
+       N == 4, C:
+          Add, bus, D, DF
+       N == 5, D:
+          Add, bus, ~D, ~DF
+       N == 6:
+          Shift Right
+       N == 7, F: Add, !bus, D, ~DF
+
+    I == F:
+       N = 0, 8
+           pass, bus
+       N = 1, 9
+           or
+       N = 2, A
+           and
+       N == 3, B:
+           xor
+       N == 4, c:
+          add bus, D, 0
+       N == 5, d:
+          add bus, !D, 1
+       N == 6, e:
+          shift
+       N == 7, f:
+          add !bus, D, 1
+
+     update D bus: I = 0, 4, 8, 9, F(N==2)
+            D alu: I = 7, F, 7(N<2>)
+       
+     update X bus: <7:4>I=0,1, E
+            X N:
+            X clear  reset
+
+     update R(x).0; reset(0), 1,2,3<!cond>,4,6<!N<3>>,C,F<N<3>>,7<N<3:2>==11>(inc), 3<cond>(bus), A
+     update R(x).1; reset(0), 1,2,3,4,6<!N<3>>,C,F<N<3>>,7<N<3:2>==11>(inc),B
+
+     alu op <add,or,and,xor>
+          A = D, !D, 0
+          B = bus, !bus, 0
+                 
+
+

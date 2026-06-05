@@ -1,0 +1,2 @@
+#define VERSION_MAJOR @cosmo_VERSION_MAJOR@
+#define VERSION_MINOR @cosmo_VERSION_MINOR@

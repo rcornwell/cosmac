@@ -251,7 +251,7 @@ error(int err)
         fprintf(output, "%04d %s     ", line_num, buffer);
     } else {
         dumpline();
-        fputs("                                   ", output);
+        fputs("                                     ", output);
     }
     for (p = buffer; p != line_ptr && *p != '\0'; p++) {
          putc(' ', output);
@@ -434,34 +434,29 @@ scan_symbol(char ch, int emit_byte)
         }
         return FINISH;
     }
-    if (ch == 'A') {
-        acon = 1;
-        if (*line_ptr == '.') {
+    if (ch == 'A' && !isalnum(*line_ptr)) {
+        aoff = 3;
+        if (line_ptr[0] == '.' && line_ptr[1] == '0') {
+            aoff = 1;
+            line_ptr += 2;
+        } else if (line_ptr[0] == '.' && line_ptr[1] == '1') {
+            aoff = 2;
+            line_ptr += 2;
+        }
+        ch = *line_ptr;
+        if (ch == '(') {
+            acon = 1;
             line_ptr++;
-            if (*line_ptr == '0') {
-                aoff = 1;
-            } else if (*line_ptr == '1') {
-                aoff = 2;
-            } else {
-                error(6); /* invalid address constant. */
+            if (skip_blanks()) {
+                error(6); /* invalid statement terminater */
+                return START;
             }
-            line_ptr++;
-        } else {
-            aoff = 3;
-        }
-        if (*line_ptr++ != '(') {
-            error(6); /* Invalid Address constant */
-            return FINISH;
-        }
-        if (skip_blanks()) {
-            error(6); /* invalid statement terminater */
-            return START;
-        }
-        ch = *line_ptr++;
-        if (ch == '*') {
-            expr = &location;
-            value = expr->value;
-            return OFFSET;
+            ch = *line_ptr++;
+            if (ch == '*') {
+                expr = &location;
+                value = expr->value;
+                return OFFSET;
+            }
         }
     }
 
@@ -475,6 +470,7 @@ scan_symbol(char ch, int emit_byte)
             }
             ch = toupper(*line_ptr++);
         }
+
         expr = lookup_symbol(0);
         if (expr == NULL) {
             return BEGIN;
@@ -718,11 +714,14 @@ int pass()
                  while(i <= sizeof(symbol) && state == START) {
                      ch = toupper(*line_ptr);
                      switch(ch) {
+                     case '.':
                      case '\n':
                      case '\0':
                      case ' ':
                      case '\t':
-                     case '.':
+                     case '#':
+                     case '*':
+                     case ',':
                      case ';':
                          state = OP;   /* See if we got opcode */
                          break;
@@ -1070,6 +1069,7 @@ int pass()
                          symbol[i] = ch;
                          ch = toupper(*line_ptr++);
                          if (!isalnum(ch)) {
+                             line_ptr--;
                              break;
                          }
                      }
@@ -1109,9 +1109,6 @@ int pass()
                      } else {
                          value = (int)*line_ptr++;
                     }
-                 }
-                 if (*line_ptr == '\0' || *line_ptr == '\n') {
-                     error(10);
                  }
                  emit_byte = 0;
                  state = FINISH;

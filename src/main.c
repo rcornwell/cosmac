@@ -586,19 +586,14 @@ audio_callback(void *user_data, Uint8 *raw_buffer, int bytes)
 void init_window()
 {
 
-    // Start SDL
+    /* Start SDL */
     SDL_Init( SDL_INIT_EVERYTHING );
 
     window = SDL_CreateWindow("Cosmac VIP", SDL_WINDOWPOS_UNDEFINED,
                                      SDL_WINDOWPOS_UNDEFINED,
                            128*scale, 128*scale, SDL_WINDOW_RESIZABLE );
-    /* Create icon for display */
-#if 0
-    icon = IMG_ReadXPMFromArray((char **)icon_image);
-    SDL_SetWindowIcon(window, icon);
-#endif
-
-    // Request audio playback
+    SDL_SetWindowMinimumSize(window, 128, 128);
+    /* Request audio playback */
     request.freq = FREQUENCY;
     request.format = AUDIO_S16SYS;
     request.channels = 1;
@@ -688,6 +683,7 @@ run_sim()
 {
     SDL_Event event;
     float  time_left = 0.0f;
+    int    resizing = 0;
 
     // Initialize SDL for display
     POWER = 1;
@@ -859,109 +855,46 @@ run_sim()
 
           case SDL_KEYDOWN:
                  switch(event.key.keysym.scancode) {
-                 case SDL_SCANCODE_0:
-                         key[0] = 1;
-                         break;
-
-                 case SDL_SCANCODE_1:
-                         key[1] = 1;
-                         break;
-
-                 case SDL_SCANCODE_2:
-                         key[2] = 1;
-                         break;
-
-                 case SDL_SCANCODE_3:
-                         key[3] = 1;
-                         break;
-
-                 case SDL_SCANCODE_4:
-                         key[4] = 1;
-                         break;
-
-                 case SDL_SCANCODE_5:
-                         key[5] = 1;
-                         break;
-
-                 case SDL_SCANCODE_6:
-                         key[6] = 1;
-                         break;
-
-                 case SDL_SCANCODE_7:
-                         key[7] = 1;
-                         break;
-
-                 case SDL_SCANCODE_8:
-                         key[8] = 1;
-                         break;
-
-                 case SDL_SCANCODE_9:
-                         key[9] = 1;
-                         break;
-
-                 case SDL_SCANCODE_A:
-                         key[0xa] = 1;
-                         break;
-
-                 case SDL_SCANCODE_B:
-                         key[0xb] = 1;
-                         break;
-
-                 case SDL_SCANCODE_C:
-                         key[0xc] = 1;
-                         break;
-
-                 case SDL_SCANCODE_D:
-                         key[0xd] = 1;
-                         break;
-
-                 case SDL_SCANCODE_E:
-                         key[0xe] = 1;
-                         break;
-
-                 case SDL_SCANCODE_F:
-                         key[0xf] = 1;
-                         break;
-
-                 case SDL_SCANCODE_N:
+                 case SDL_SCANCODE_X:
                          key2[0] = 1;
                          break;
 
-                 case SDL_SCANCODE_H:
+                 case SDL_SCANCODE_A:
                          key2[1] = 1;
                          break;
 
-                 case SDL_SCANCODE_J:
+                 case SDL_SCANCODE_S:
                          key2[2] = 1;
                          break;
 
-                 case SDL_SCANCODE_K:
+                 case SDL_SCANCODE_D:
                          key2[3] = 1;
                          break;
 
-                 case SDL_SCANCODE_L:
+                 case SDL_SCANCODE_Q:
                          key2[4] = 1;
                          break;
 
-                 case SDL_SCANCODE_Y:
+                 case SDL_SCANCODE_W:
                          key2[5] = 1;
                          break;
 
-                 case SDL_SCANCODE_U:
+                 case SDL_SCANCODE_E:
                          key2[6] = 1;
                          break;
 
-                 case SDL_SCANCODE_I:
+                 case SDL_SCANCODE_1:
                          key2[7] = 1;
                          break;
 
-                 case SDL_SCANCODE_O:
+                 case SDL_SCANCODE_2:
                          key2[8] = 1;
                          break;
 
-                 case SDL_SCANCODE_P:
+                 case SDL_SCANCODE_3:
                          key2[9] = 1;
                          break;
+
                  case SDL_SCANCODE_KP_0:
                          key[0] = 1;
                          break;
@@ -1026,9 +959,6 @@ run_sim()
                          key[0xf] = 1;
                          break;
 
-                 case SDL_SCANCODE_Q:
-                         POWER = 0;
-                         break;
                  default:
                          break;
                  }
@@ -1036,6 +966,14 @@ run_sim()
           case SDL_WINDOWEVENT:
                  switch (event.window.event) {
                  case SDL_WINDOWEVENT_CLOSE:
+                      break;
+                 case SDL_WINDOWEVENT_SIZE_CHANGED:
+                      if (!resizing) {
+                          int   newHeight = event.window.data2;
+                          resizing = 1;
+                          SDL_SetWindowSize(window, newHeight, newHeight);
+                          resizing = 0;
+                      }
                       break;
                  }
                  break;

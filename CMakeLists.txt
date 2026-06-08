@@ -69,7 +69,6 @@ else()
 endif()
 
 include(CheckIncludeFiles)
-check_include_files(unistd.h HAVE_UNISTD_H)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/src/config.h)
 
 find_package (SDL2 REQUIRED)
@@ -92,7 +91,7 @@ else()
     add_compile_options( -Wall -Wunused-result $<$<CONFIG:DEBUG>:-g>)
     add_compile_definitions($<$<CONFIG:DEBUG>:DEBUG>)
 endif()
-set(FONT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fonts)
+
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 add_subdirectory(src)

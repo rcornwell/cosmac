@@ -36,7 +36,7 @@
 #include "roms.h"
 #include <math.h>
 #include <errno.h>
-#include <termio.h>
+#include <termios.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <sys/stat.h>
@@ -477,11 +477,10 @@ init_console()
         return;
     }
 
-    if (tcgetattr(0, &save_termios) < 0) { /* save original state. */
-       return;
+    if (tcgetattr(STDIN_FILENO, &save_termios) < 0) {
+        perror("tcgetattr");
+        return;
     }
-
-    buf = save_termios;
     buf = save_termios;
 
     buf.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);

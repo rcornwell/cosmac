@@ -74,16 +74,10 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in ${CMAKE_CURRENT_BINAR
 
 find_package (SDL2 REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
-find_package (SDL2_image REQUIRED)
-target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_IMAGE_INCLUDE_DIRS})
-find_package (SDL2_ttf REQUIRED)
-target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_TTF_INCLUDE_DIRS})
 find_package (SDL2_mixer REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_MIXER_INCLUDE_DIRS})
 
 target_link_libraries(${PROJECT_NAME} PUBLIC ${SDL2_LIBRARIES}
-	                                         ${SDL2_IMAGE_LIBRARIES}
-                                             ${SDL2_TTF_LIBRARIES}
                                              ${SDL2_MIXER_LIBRARIES})
 
 if (RUN_TESTS)
@@ -148,7 +142,6 @@ add_custom_command(TARGET cosmo POST_BUILD
       COMMAND_EXPAND_LISTS)
 #install(FILES ${SDL2_LIBRARY}/SDL2.dll DESTINATION bin)
 #install(FILES ${SDL2_MIXER_LIBRARY}/SDL2_mixer.dll DESTINATION bin)
-#install(FILES ${SDL2_IMAGE_LIBRARY}/SDL2_image.dll DESTINATION bin)
 install(TARGETS cosmo RUNTIME DESTINATION bin)
 install(TARGETS asm1802 RUNTIME DESTINATION bin)
 else()

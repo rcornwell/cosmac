@@ -78,7 +78,7 @@ int               read_dump(char *name);
 #define FREQUENCY 44100
 
 
-uint32_t          screen[128*128];
+uint32_t          screen[128*256];
 int               sample_pos;         /**< Position to write audio samples */
 
 #define CYCLES_PER_SCREEN (262*14)
@@ -590,8 +590,8 @@ void init_window()
 
     window = SDL_CreateWindow("Cosmac VIP", SDL_WINDOWPOS_UNDEFINED,
                                      SDL_WINDOWPOS_UNDEFINED,
-                           128*scale, 128*scale, SDL_WINDOW_RESIZABLE );
-    SDL_SetWindowMinimumSize(window, 128, 128);
+                           256*scale, 128*scale, SDL_WINDOW_RESIZABLE );
+    SDL_SetWindowMinimumSize(window, 256, 128);
     /* Request audio playback */
     request.freq = FREQUENCY;
     request.format = AUDIO_S16SYS;
@@ -628,7 +628,7 @@ void init_screen()
 void
 draw_screen()
 {
-    SDL_UpdateTexture( texture, 0, screen, 128 * sizeof(uint32_t));
+    SDL_UpdateTexture( texture, 0, screen, 256 * sizeof(uint32_t));
     SDL_RenderCopy( render, texture, 0, 0);
     SDL_RenderPresent( render );
 }
@@ -660,11 +660,14 @@ SDL_Color palette[8] = {
 void
 draw_pixel(uint8_t pix, int row, int col)
 {
-     screen[(row * 128) + (col * 2) + 0] = SDL_MapRGBA(format,
+     screen[(row * 256) + (col * 4) + 0] = SDL_MapRGBA(format,
              palette[pix].r, palette[pix].g, palette[pix].b, 0xff);
-     screen[(row * 128) + (col * 2) + 1] = SDL_MapRGBA(format,
+     screen[(row * 256) + (col * 4) + 1] = SDL_MapRGBA(format,
              palette[pix].r, palette[pix].g, palette[pix].b, 0xff);
-//     disp[row][col] = pix;
+     screen[(row * 256) + (col * 4) + 2] = SDL_MapRGBA(format,
+             palette[pix].r, palette[pix].g, palette[pix].b, 0xff);
+     screen[(row * 256) + (col * 4) + 3] = SDL_MapRGBA(format,
+             palette[pix].r, palette[pix].g, palette[pix].b, 0xff);
 }
 
 
@@ -694,7 +697,7 @@ run_sim()
     }
     render = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_RGBA32,
-                    SDL_TEXTUREACCESS_STREAMING, 128, 128);
+                    SDL_TEXTUREACCESS_STREAMING, 256, 128);
     format = SDL_AllocFormat(SDL_PIXELFORMAT_RGBA32);
     SDL_SetRenderDrawColor( render, 0x00, 0x00, 0x00, 0xFF);
     SDL_RenderClear( render);
@@ -968,9 +971,9 @@ run_sim()
                       break;
                  case SDL_WINDOWEVENT_SIZE_CHANGED:
                       if (!resizing) {
-                          int   newHeight = event.window.data2;
+                          int   newWidth = event.window.data1;
                           resizing = 1;
-                          SDL_SetWindowSize(window, newHeight, newHeight);
+                          SDL_SetWindowSize(window, newWidth, newWidth/2);
                           resizing = 0;
                       }
                       break;

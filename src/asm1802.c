@@ -136,6 +136,7 @@ int main(int argc, char *argv[])
          char *p = argv[i];
          if (*p == '-') {
              p++;
+             /* Set listing file instead of stdout */
              if(*p == 'l') {
                  if (output != NULL) {
                      fprintf(stderr, "Duplicate output file\n");
@@ -147,6 +148,7 @@ int main(int argc, char *argv[])
                      exit(1);
                  }
               }
+              /* Write binary output to file, optional starting page for binary */
               if (*p == 'b') {
                   if (bin_out != NULL) {
                       fprintf(stderr, "Duplicate output file\n");
@@ -165,6 +167,7 @@ int main(int argc, char *argv[])
                       }
                       start_page = (start_page << 4) + hex_digit(*p);
                   }
+                  start_page &= 0xff;
                   start_page <<= 8;
                }
          } else {

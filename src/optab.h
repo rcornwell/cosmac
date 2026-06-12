@@ -29,16 +29,17 @@
 
 #include <stdint.h>
 
-typedef enum { OPR, OPN, OPB, OPO, OPI, OPL} opcode_type;
 
-//
-//     OPR     op
-//     OPN     op   number
-//     OPB     op   address
-//     OPO     op   number
-//     OPI     op   #number
-//     OPL     op   address
-//
+/*
+ *     OPR     op
+ *     OPN     op   number
+ *     OPB     op   address
+ *     OPO     op   number
+ *     OPI     op   #number
+ *     OPL     op   address
+ */
+
+typedef enum { OPR, OPN, OPB, OPO, OPI, OPL} opcode_type;
 
 struct opcode {
     char         *name;
@@ -46,8 +47,8 @@ struct opcode {
     uint8_t       base;
     uint8_t       mask;
     int           len;
-}
-;
+};
+
 extern const struct opcode opcode_map[];
 
 #endif

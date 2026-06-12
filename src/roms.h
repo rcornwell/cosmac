@@ -24,8 +24,12 @@
  *
  */
 
-#include <stdint.h>
+#pragma once
 
+#ifndef _ROM_H_
+#define _ROM_H_
+
+#include <stdint.h>
 
 /**
  * @brief COSMAC VIP monitor Rom.
@@ -53,3 +57,5 @@ extern const uint8_t chip8x_data[768];
  * @brief RCA_Studio rom.
  */
 extern const uint8_t rca_studio_data[2048];
+
+#endif

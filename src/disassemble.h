@@ -33,16 +33,34 @@
  * @brief Disassemble an instruction into string.
  *
  * Convert instruction to readable string.
+ *
+ * @param res   Pointer to buffer to generate decoded instruction too.
+ * @param ir    Instruction to decode.
+ * @param pc    Address of current instruction.
+ * @param addr  Next two bytes following instruction.
+ * @param len   Location to return length of instruction.
  */
 void disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len);
 
 /**
  * @brief Dump index registers.
+ *
+ * Dump out registers as a string to res.
+ *
+ * @param res   string to write register dump to.
  */
 void dumpregs(char *res);
 
 /**
  * @brief Display CPU state and current instruction.
+ *
+ * Display trace record of interrupt cycle.
+ */
+void trace_irq();
+
+/**
+ * @brief Display CPU state and current instruction.
  */
 void trace();
+
 #endif

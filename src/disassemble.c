@@ -35,6 +35,12 @@
  * @brief Disassemble an instruction into string.
  *
  * Convert instruction to readable string.
+ *
+ * @param res   Pointer to buffer to generate decoded instruction too.
+ * @param ir    Instruction to decode.
+ * @param pc    Address of current instruction.
+ * @param addr  Next two bytes following instruction.
+ * @param len   Location to return length of instruction.
  */
 void
 disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len)
@@ -44,20 +50,20 @@ disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len)
 
     *len = 1;
 
-    // Search opcode map for match
+    /* Search opcode map for match */
     for(op = opcode_map; op->name != NULL; op++) {
         if ((ir & op->mask) == op->base) {
             break;
         }
     }
 
-    // If not found dump possible opcode
+    /* If not found dump possible opcode */
     if (op->name == NULL) {
         sprintf(res, "%02x %04x", ir, addr);
         return;
     }
 
-    // Convert opcode based on type.
+    /* Convert opcode based on type. */
     *len = op->len;
     switch(op->len) {
     case 1:
@@ -73,27 +79,27 @@ disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len)
 
 
     switch(op->type) {
-    case OPR:  // Basic operators.
+    case OPR:  /* Basic operators. */
          temp[0] = '\0';
          break;
 
-    case OPN:  // Index register operators.
+    case OPN:  /* Index register operators. */
          sprintf(temp, " R%X", ir & 0xf);
          break;
 
-    case OPB:  // Short branch instructions.
+    case OPB:  /* Short branch instructions. */
          sprintf(temp, " %04x", (pc & 0xff00) | (addr & 0xff));
          break;
 
-    case OPO:  // Input/output instructions.
+    case OPO:  /* Input/output instructions. */
          sprintf(temp, " %d", ir & 0x7);
          break;
 
-    case OPI: // Immediate value instructions.
+    case OPI: /* Immediate value instructions. */
          sprintf(temp, " #%02x", addr & 0xff);
          break;
 
-    case OPL: // Long branches.
+    case OPL: /* Long branches. */
          sprintf(temp, " %02x%02x", addr & 0xff,  (addr >> 8) & 0xff);
          break;
     }
@@ -102,6 +108,10 @@ disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len)
 
 /**
  * @brief Dump index registers.
+ *
+ * Dump out registers as a string to res.
+ *
+ * @param res   string to write register dump to.
  */
 void
 dumpregs(char *res)
@@ -117,6 +127,8 @@ dumpregs(char *res)
 
 /**
  * @brief Display CPU state and current instruction.
+ *
+ * Display trace record of interrupt cycle.
  */
 void
 trace_irq()

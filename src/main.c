@@ -1,8 +1,8 @@
 /*
- * Cosmac VIP - Main start-up file.
+ * Cosmac VIP - Main interface to System.
  *
  * Author:      Richard Cornwell (rich@sky-visions.com)
- * Copyright 2023, Richard Cornwell
+ * Copyright 2025, Richard Cornwell
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -11,9 +11,6 @@
  * sell copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +18,27 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
+ */
+
+/**
+ * @file main.c
+ * @brief SDL2-based frontend for the Cosmac VIP emulator.
  *
+ * Entry point and platform interface that ties together:
+ * - Command-line argument parsing for system selection, ROM loading,
+ *   tape and serial configuration, and display scaling
+ * - SDL2 window creation, rendering, audio playback, and event handling
+ * - Virtual keyboard mapping (VIP hex keypad and Studio II/III layout)
+ * - Main simulation loop with timing control for consistent frame rates
+ *
+ * System supported:
+ * - COSMAC VIP (default) - standard black & white terminal
+ * - VP - COSMAC VIP with color display expansion
+ * - RCA Studio II - home video game console
+ * - RCA Studio III - later home console variant
+ *
+ * @author Richard Cornwell (rich@sky-visions.com)
+ * @copyright 2023 Richard Cornwell
  */
 
 #ifndef _WIN32
@@ -59,53 +76,115 @@
  * This is not a class since these functions interface with C libraries.
  */
 
-SDL_Window       *window;
-SDL_Surface      *icon;
-SDL_Renderer     *render;
-SDL_Texture      *texture;
-SDL_AudioDeviceID audio_device;
-SDL_AudioSpec     request;
-SDL_AudioSpec     obtained;
-SDL_PixelFormat  *format;
-SDL_Thread       *serial_thread;
-uint8_t           key[16];
-uint8_t           key2[16];
-
-int               run_flag;
-int               read_bin(char *name);
-int               read_dump(char *name);
-
+/** @brief Frequence to output audio as */
 #define FREQUENCY 44100
 
-
-uint32_t          screen[128*256];
-int               sample_pos;         /**< Position to write audio samples */
-
+/** @brief Number of cycles per display frame (262 scan lines * 14 cycles). */
 #define CYCLES_PER_SCREEN (262*14)
+
+/** @brief Target frame time in milliseconds (~60Hz). */
 #define FRAME_TIME        16.650f
 
-int               scale;              /**< Screen scaling */
-int               POWER;              /**< Game boy power state */
-int               trace_flag;         /**< Trace instruction execution */
-int               serial;             /**< Serial port */
-FILE              *tape_file;         /**< Tape data file. */
 
+/**
+ * @brief SDL2 window.
+ */
+SDL_Window      *window;
+
+/**
+ * @brief SDL2 video surface used for the emulator window icon.
+ */
+SDL_Surface      *icon;
+
+/** @brief SDL2 renderer for drawing to the emulator window. */
+SDL_Renderer     *render;
+
+/** @brief SDL2 texture holding the 256x128 pixel frame buffer. */
+SDL_Texture      *texture;
+
+/** @brief Open SDL2 audio device ID for output. */
+SDL_AudioDeviceID audio_device;
+
+/** @brief Requested audio specifications. */
+SDL_AudioSpec     request;
+
+/** @brief Obtained audio specifications (after device open). */
+SDL_AudioSpec     obtained;
+
+/** @brief Pixel format for the frame buffer. */
+SDL_PixelFormat  *format;
+
+/** @brief Thread handle for serial console input (only when -s is set). */
+SDL_Thread       *serial_thread;
+
+/**
+ * @brief VIP keyboard state - 16 keys mapped to the hex keypad.
+ * Indices: 0=digit 0, 1-9=digits, 0xa=period(A), 0xb=enter(B),
+ * 0xc=plus(C), 0xd=minus(D), 0xe=multiply(E), 0xf=divide(F).
+ */
+uint8_t           key[16];
+
+/**
+ * @brief RCA Studio II/III keyboard state - 10 keys.
+ * Indices: 0=X, 1=A, 2=S, 3=D, 4=Q, 5=W, 6=E, 7=1, 8=2, 9=3.
+ */
+uint8_t           key2[16];
+
+/** @brief Main simulation run flag - non-zero when CPU should execute. */
+int               run_flag;
+
+/** @brief Frame buffer - 256x128 32-bit pixels (RGBA). */
+uint32_t          screen[128*256];
+
+/** @brief Current sample position for sequential audio generation. */
+int               sample_pos;
+
+/** @brief Display scaling factor (1-9) applied to window dimensions. */
+int               scale;
+
+/** @brief Power state - non-zero while the emulator is running. */
+int               POWER;
+
+/** @brief Instruction trace flag - non-zero when tracing enabled. */
+int               trace_flag;
+
+/** @brief Serial console enabled flag - non-zero when serial I/O active. */
+int               serial;
+
+/** @brief Virtual tape file handle. */
+FILE              *tape_file;
+
+/** @brief Saved terminal attributes for restoration on exit. */
 struct termios    save_termios;
+
+/** @brief Whether terminal attributes were successfully saved. */
 int               term_saved;
+
+/** @brief File descriptor for /dev/tty (serial console terminal). */
 int               term;
+
+/** @brief Base address offset for binary file loading (0x000 default,
+ *  0x0400 for RCA Studio cartridge ROM loading). */
 uint16_t          bin_base = 0;
 
+/** @brief System type names for command-line -e option matching. */
 char *names[] = { "vip", "vp", "studio2", "studio3", NULL};
 
 
 /**
- * @brief  main, entry to system.
+ * @brief Entry point for the Cosmac VIP emulator.
  *
- * Scan arguments looking for scale and cartridge file names to load.
+ * Parses command-line arguments to configure the emulation target,
+ * load ROM/tape/dump files, set memory size, enable tracing/serial,
+ * and initialize SDL2. Then runs the main simulation loop via run_sim().
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Array of command-line argument strings.
+ * @return 0 on success.
  */
 int main(int argc, char **argv)
 {
-     int           i;            /* Temp */
+     int           i;
      int           help = 0;
 
      /* Print banner out */
@@ -173,7 +252,7 @@ int main(int argc, char **argv)
                            case RCA_STUDIO3:
                                     color = 1;
                            case RCA_STUDIO2:
-                                    memmask = 0xfff;
+                                    memmask = 0x9ff;
                                     memsize = 4096;
                                     bin_base = 1024;
                            break;
@@ -317,6 +396,7 @@ read_bin(char *name)
      if (cartridge && p != NULL && strcmp(p, ".st2") == 0) {
          printf("Studio 2 cartridge\n");
          bin_base -= 256;
+         cartridge = 1;
      }
 
      got = fread(&memory[bin_base], 1, len, in);
@@ -367,12 +447,12 @@ read_dump(char *name)
         uint16_t  value = 0;
 
         for (ptr = buffer; *ptr != '\0'; ptr++) {
-            // If space skip to next char.
+            /* If space skip to next char. */
             if (isspace(*ptr)) {
                 continue;
             }
 
-            // Terminate scan on ;.
+            /* Terminate scan on ;. */
             if (*ptr == ';') {
                 break;
             }
@@ -450,7 +530,7 @@ write_console(uint16_t data)
      char c = (char)(data & 0x7f);
      write(term, &c, 1);
 }
- 
+
 /**
  * @brief restore terminal to original state.
  */
@@ -511,7 +591,11 @@ init_console()
     atexit(&console_done);
 }
 
-
+/**
+ * @brief Write a byte to tape output.
+ *
+ * Tape data is written as a hex number.
+ */
 void
 tape_write_byte(uint8_t data)
 {
@@ -519,6 +603,9 @@ tape_write_byte(uint8_t data)
      fputc(hex[data & 0xf], tape_file);
 }
 
+/**
+ * @brief Read byte from tape file.
+ */
 uint8_t
 tape_read_byte()
 {
@@ -562,7 +649,7 @@ void
 audio_callback(void *user_data, Uint8 *raw_buffer, int bytes)
 {
      Sint16 *buffer = (Sint16*)raw_buffer;
-     int length = bytes / 2; // Two bytes per sample.
+     int length = bytes / 2; /* Two bytes per sample. */
      int sample_nr = *(int *)user_data;
 
      int samples_per_period = FREQUENCY/440;
@@ -634,6 +721,12 @@ draw_screen()
 }
 
      /* R    G    B      A */
+/**
+ * @brief Color map for color display.
+ *
+ *  Background uses the following values 2 -> 0 -> 4 -> 1 -> 2.
+ *  The backgound if rotated via a OUT or IN instruction.
+ */
 SDL_Color palette[8] = {
      { 0x00, 0x00, 0x00, 0xff },  /* 0 Black, back 2 */
      { 0xff, 0x00, 0x00, 0xff },  /* 1 Red, back 4 */
@@ -644,9 +737,6 @@ SDL_Color palette[8] = {
      { 0x00, 0xff, 0xff, 0xff },  /* 6 Aqua */
      { 0xff, 0xff, 0xff, 0xff },  /* 7 White */
 };
-
-/* Background */
-/* 2 -> 0 -> 4 -> 1 -> 2 */
 
 /**
  * @brief Draw a pixel.
@@ -687,7 +777,7 @@ run_sim()
     float  time_left = 0.0f;
     int    resizing = 0;
 
-    // Initialize SDL for display
+    /* Initialize SDL for display */
     POWER = 1;
     run_flag = 0;
     if (serial) {
@@ -704,14 +794,11 @@ run_sim()
     SDL_RenderPresent( render );
     for (int i = 0; i < 16; key[i++] = 0);
     while(POWER) {
-       // Process events
+       /* Process events */
        uint64_t     start_time = SDL_GetPerformanceCounter();
        while(SDL_PollEvent(&event)) {
           switch(event.type) {
-          case SDL_MOUSEBUTTONDOWN:
-               break;
-          case SDL_MOUSEBUTTONUP:
-               break;
+          /* Process key up events. */
           case SDL_KEYUP:
                  switch(event.key.keysym.scancode) {
                  case SDL_SCANCODE_X:
@@ -818,7 +905,7 @@ run_sim()
                          key[0xf] = 0;
                          break;
 
-                 case SDL_SCANCODE_F1:  // Toggle run flag.
+                 case SDL_SCANCODE_F1:  /* Toggle run flag. */
                          run_flag = !run_flag;
                          reset();
                          if (run_flag) {
@@ -828,22 +915,22 @@ run_sim()
                          }
                          break;
 
-                 case SDL_SCANCODE_F2:  // Start tape read.
+                 case SDL_SCANCODE_F2:  /* Start tape read. */
                          taperead();
                          break;
 
-                 case SDL_SCANCODE_F3:  // Start tape write.
+                 case SDL_SCANCODE_F3:  /* Start tape write. */
                          tapewrite();
                          break;
 
-                 case SDL_SCANCODE_F4:  // Perform one instruction step.
+                 case SDL_SCANCODE_F4:  /* Perform one instruction step. */
                          run();
                          step();
                          trace();
                          stop();
                          break;
 
-                 case SDL_SCANCODE_F5:  // Restart running.
+                 case SDL_SCANCODE_F5:  /* Restart running. */
                          run();
                          break;
 
@@ -855,6 +942,7 @@ run_sim()
                  }
                  break;
 
+          /* Process keydown events */
           case SDL_KEYDOWN:
                  switch(event.key.keysym.scancode) {
                  case SDL_SCANCODE_X:
@@ -965,6 +1053,8 @@ run_sim()
                          break;
                  }
                  break;
+
+          /* Handle window events, close and resize */
           case SDL_WINDOWEVENT:
                  switch (event.window.event) {
                  case SDL_WINDOWEVENT_CLOSE:
@@ -979,15 +1069,19 @@ run_sim()
                       break;
                  }
                  break;
+
+          /* Quit event, turn off power */
           case SDL_QUIT:
                  POWER = 0;
                  break;
+
+          /* Ignore everything else */
           default:
                  break;
           }
        }
 
-       // Run for 16.742ms, or one frame.
+       /* Run for 16.742ms, or one frame. */
        while(get_cycles() < CYCLES_PER_SCREEN) {
           if (trace_flag && running && !idle) {
               if ((dma_out | dma_in) == 0) {
@@ -997,35 +1091,35 @@ run_sim()
           step();
        }
 
-       // If Q set turn on sound.
+       /* If Q set turn on sound, don't if Q used for serial output. */
        if (!serial) {
            SDL_PauseAudioDevice(audio_device, !Q);
        }
 
-       // Tell CPU how many major cycles it should have run
+       /* Tell CPU how many major cycles it should have run */
        reset_cycles(CYCLES_PER_SCREEN);
 
-       // Compute how long to wait for before next screen
+       /* Compute how long to wait for before next screen */
        uint64_t end_time = SDL_GetPerformanceCounter();
        float elapsedMS = (end_time - start_time) /
                 (float)SDL_GetPerformanceFrequency() * 1000.0f;
 
-       // Add in previous frame remainder
+       /* Add in previous frame remainder */
        elapsedMS += time_left;
        if (elapsedMS < FRAME_TIME) {
            SDL_Delay((uint32_t)floor(FRAME_TIME - elapsedMS));
        }
 
-       // Compute amount of time delay actually waited for
+       /* Compute amount of time delay actually waited for */
        uint64_t frame_time = SDL_GetPerformanceCounter();
        float frameMS = (frame_time - start_time) /
                 (float)SDL_GetPerformanceFrequency() * 1000.0f;
 
-       // Adjust next frame to be correct
+       /* Adjust next frame to be correct */
        time_left = frameMS - FRAME_TIME;
     }
 
-    // Clean up house
+    /* Clean up house */
     SDL_FreeFormat(format);
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(render);

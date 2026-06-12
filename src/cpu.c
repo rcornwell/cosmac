@@ -13,6 +13,10 @@
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
+ * Implements the complete CDP 1802 instruction set, clock cycle timing,
+ * memory management with address space decoding for multiple systems
+ * (VIP, VP, RCA Studio II, RCA Studio III), DMA display output, tape
+ * I/O with mark/space frequency shift keying, and serial console support.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -21,7 +25,24 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
+*/
+
+/**
+ * @file cpu.c
+ * @brief CDP 1802 CPU core implementation for Cosmac VIP emulation.
  *
+ * Implements the complete CDP 1802 instruction set, clock cycle timing,
+ * memory management with address space decoding for multiple systems
+ * (VIP, VP, RCA Studio II, RCA Studio III), DMA display output, tape
+ * I/O with mark/space frequency shift keying, and serial console support.
+ *
+ * The CDP 1802 is a register-indirect CPU with 16 universal 16-bit index
+ * registers (R0-R15), an 8-bit accumulator (D), and a data flag (DF).
+ * The program counter and default index register are selected from the
+ * index registers via the P and X registers respectively.
+ *
+ * @author Richard Cornwell (rich@sky-visions.com)
+ * @copyright 2025 Richard Cornwell
  */
 
 #include <stdio.h>
@@ -31,58 +52,208 @@
 #include "roms.h"
 
 
-uint16_t   regs[16];       /**< Cpu index registers */
-uint8_t    D;              /**< Cpu Data register */
-uint8_t    DF;             /**< Carry flag */
-uint8_t    P;              /**< Program counter index register */
-uint8_t    X;              /**< Index register */
-uint8_t    N;              /**< Instruction Index register */
-uint8_t    T;              /**< Temporary register */
-uint8_t    Q;              /**< Q flag */
-uint8_t    I;              /**< Interupt enable */
-uint8_t    EF;             /**< External flags */
-int        line;           /**< Display line */
-int        col;            /**< Display column */
-int        row;            /**< Display row */
-int        dot_pos;        /**< Position to write data to. */
-uint8_t    irq_flag;       /**< Interrupt flag */
-uint8_t    display_on;     /**< Display enabled */
-uint8_t    display_status;
-uint16_t   rom_enable;     /**< Rom enable */
-uint16_t   memsize;        /**< Size of memory */
-uint16_t   memmask;        /**< Bits use to access memory */
-uint8_t    memory[32*1024]; /**< Memory */
-uint8_t    dma_in;         /**< Do DMA input cycle */
-uint8_t    dma_out;        /**< Do DMA output cycle */
-uint8_t    idle;           /**< Cpu executing idle instruction */
-int        key_select;     /**< Current key selection */
-uint8_t    running;        /**< CPU is currently running */
-uint64_t   cycles;         /**< Current cycle count */
-int        tapecycles;     /**< Cycle of tape read/write */
-int        lastcycle;      /**< Time of last Q bit change */
-int        bitcount;       /**< Bit number being output */
-int        bittimer;
-uint8_t    leader;
-uint8_t    phase;
-uint8_t    value;
-int        parity;
-uint8_t    tape_data;
-uint8_t    tape_read;
-uint8_t    tape_write;
-uint16_t   serial_out;     /**< Serial output data */
-uint16_t   serial_in;      /**< Last character recieved */
-int        serial_out_cnt; /**< Control register for serial */
-int        serial_in_cnt;  /**< Control register for serial */
-int        color;          /**< Color support. */
-int        system_type;    /**< Emulated system */
-int        bg_color;       /**< Current background color */
-int        color_en;       /**< Color enabled */
-int        pallet[256];    /**< Color pallet */
-int        bg_map[4] = { 2, 0, 4, 1 };
-int        cartridge = 0;
+/** @brief 16 index registers (R0-R15). R(P) is program counter, R(X) is default
+ *  index for register-indirect addressing, R(N) is the instruction-specified
+ *  register (lower 4 bits of opcode). */
+uint16_t   regs[16];
 
-/* Background */
-/* 2 -> 0 -> 4 -> 1 -> 2 */
+
+/** @brief Accumulator (D) - primary 8-bit data register for ALU operations. */
+uint8_t    D;
+
+
+/** @brief Data Flag (DF) - carry/borrow flag for arithmetic operations. */
+uint8_t    DF;
+
+/** @brief External Flags (EF) - used during testing to handle values of EF flags. */
+uint8_t    EF;
+
+/** @brief Program Index register - contains the index of the current program
+ *  counter register (R(P)). */
+uint8_t    P;
+
+
+/** @brief Default Index register - contains the index used for register-indirect
+ *  memory operations when not explicitly specified. */
+uint8_t    X;
+
+
+/** @brief Instruction Index register - set to the lower 4 bits of the fetched
+ *  opcode to select which R register to use. */
+uint8_t    N;
+
+
+/** @brief Temporary register - holds register indices during SAVE (SAV) and
+ *  MARK operations; used to save/restore CPU state. */
+uint8_t    T;
+
+
+/** @brief Q flag - control flag used for serial output sequencing, tape I/O
+ *  timing, and request operations. */
+uint8_t    Q;
+
+
+/** @brief Interrupt enable flag - when set, the CPU acknowledges interrupts.
+ *  Cleared on interrupt entry, set by RET/DIS instructions. */
+uint8_t    I;
+
+
+/** @brief Interrupt request flag - set by display timing at frame boundaries.
+ *  Cleared each cycle; checked by step() to trigger interrupt service. */
+uint8_t    irq_flag;
+
+
+/** @brief Current display scan line (0-261). Driven by DMA timing. */
+int        line;
+
+
+/** @brief Current column within the display line (1-14). */
+int        col;
+
+
+/** @brief Current row in the pixel buffer being written by DMA. */
+int        row;
+
+
+/** @brief Current pixel column position within the active DMA output area. */
+int        dot_pos;
+
+/** @brief Display on/off flag - controls whether DMA output draws pixels. */
+uint8_t    display_on;
+
+
+/** @brief Display status indicator - set when display is active. Used for
+ *  conditional branching (B1/BN1). */
+uint8_t    display_status;
+
+
+/** @brief ROM enable mask - ORed with addresses to map ROM or RAM regions. */
+uint16_t   rom_enable;
+
+
+/** @brief Total memory size in bytes for the emulated system. */
+uint16_t   memsize;
+
+
+/** @brief Bit mask applied to addresses to determine which address bits are
+ *  valid for memory access. */
+uint16_t   memmask;
+
+
+/** @brief 32KB emulated system memory (0x0000-0x7FFF RAM, with ROM mirroring
+ *  above 0x8000 depending on system type). */
+uint8_t    memory[32*1024];
+
+
+/** @brief DMA input flag - set when the display controller requests memory
+ *  data (not actively used in current implementation). */
+uint8_t    dma_in;
+
+
+/** @brief DMA output flag - set during active display lines to transfer
+ *  memory contents to the pixel buffer. */
+uint8_t    dma_out;
+
+
+/** @brief CPU idle flag - set by the IDLE instruction (0000xxxx). CPU waits
+ *  in idle state until an interrupt, DMA request, or wakeup event occurs. */
+uint8_t    idle;
+
+
+/** @brief Current key bank selected via OUT 2 instruction. Selects which
+ *  element from the key[] array is read during B3/B4 instructions. */
+int        key_select;
+
+
+/** @brief CPU running state - non-zero when the CPU is actively executing
+ *  instructions, zero when halted. */
+uint8_t    running;
+
+
+/** @brief Total accumulated clock cycles executed by the CPU. */
+uint64_t   cycles;
+
+
+/** @brief Cycle counter for tape read/write timing relative to program
+ *  execution. */
+int        tapecycles;
+
+
+/** @brief Cycle counter at the last Q flag transition - used for tape I/O
+ *  timing calculations. */
+int        lastcycle;
+
+
+/** @brief Bit position within a tape-recorded byte (-12 to 8). -12 starts
+ *  the leader countdown. */
+int        bitcount;
+
+
+/** @brief Timer for tape phase transitions. Counts cycles since last phase
+ *  change for proper tape sync timing. */
+int        bittimer;
+
+/** @brief Tape leader flag - non-zero during the sync leader period before
+ *  data bytes are recorded. */
+uint8_t    leader;
+
+/** @brief Tape signal phase (transition point between mark/space frequencies). */
+uint8_t    phase;
+
+/** @brief Accumulator for tape data bytes being read or written. */
+uint8_t    value;
+
+/** @brief Parity bit counter for tape recorded bytes (9-bit parity). */
+int        parity;
+
+/** @brief Current tape bit value being processed (1 for mark, 0 for space). */
+uint8_t    tape_data;
+
+/** @brief Tape read mode flag - non-zero during tape playback. */
+uint8_t    tape_read;
+
+/** @brief Tape write mode flag - non-zero during tape recording. */
+uint8_t    tape_write;
+
+/** @brief Serial output shift register (9 bits) for serial console output.
+ *  Q flag is shifted into bit 8 during transmission. */
+uint16_t   serial_out;
+
+/** @brief Last data byte received via serial console input. */
+uint16_t   serial_in;
+
+/** @brief Counter for serial output timing - decrements each cycle, triggering
+ *  data shifts at the serial baud rate. */
+int        serial_out_cnt;
+
+/** @brief Counter for serial input timing - decrements each cycle, loading
+ *  data at the receive baud rate. */
+int        serial_in_cnt;
+
+/** @brief Type of system being emulated */
+int       system_type;
+
+/** @brief Color support flag - non-zero when emulating a system with color
+ *  display capabilities (VP, RCA Studio). */
+int        color;
+
+/** @brief Current background color index (0-3). */
+int        bg_color;
+
+/** @brief Color display is currently enabled */
+int       color_en;
+
+/** @brief Color map entry for the given index. Maps display pixels to RGB
+ *  values for color output. */
+int        pallet[256];
+
+/** @brief Background color pixel mapping - converts color index to display
+ *  pixel values. Background rotate: 2 -> 0 -> 4 -> 1 -> 2 */
+int        bg_map[4] = { 2, 0, 4, 1 };
+
+/** @brief Cartridge loaded flag - non-zero when a cartridge ROM is present
+ *  in RCA Studio systems (0x0400-0x07FF). */
+int        cartridge = 0;
 
 /**
  * @brief Return number of cycles executed.
@@ -95,12 +266,16 @@ get_cycles()
     return cycles;
 }
 
+/**
+ * @brief Reset CPU to default state.
+ */
 void
 reset()
 {
     int     i;
+
     running = 0;
-    rom_enable = 0x8000;
+    rom_enable = 0x8000;   /* Force all addresses to access rom */
     I = 1;
     N = 0;
     Q = 0;
@@ -139,7 +314,8 @@ reset()
 }
 
 /**
- * @brief Tell memory how many cycles we should have run.
+ * @brief Reset number of cycles run.
+ *
  *
  * @param max_cycles Maximum number of cycles we should have run.
  */
@@ -148,6 +324,9 @@ reset_cycles(int max_cycles) {
     cycles = cycles - max_cycles;
 }
 
+/**
+ * @brief Turn display on, reset line and column to one.
+ */
 void
 set_display_on() {
     line = 1;
@@ -230,8 +409,11 @@ mem_read_nocycle(uint8_t r, int add)
     case VP:
              addr |= rom_enable;
 
-             // Anything below 0x8000 is ram.
+             /* Anything below 0x8000 is ram. */
              if ((addr & 0x8000) != 0) {
+                 if ((addr & 0xfe00) != 0x8000) {
+                     return 0xff;
+                 }
                  if (serial) {
                     return ut4_data[addr & 0x01ff];
                  }
@@ -241,12 +423,11 @@ mem_read_nocycle(uint8_t r, int add)
 
    case RCA_STUDIO2:
    case RCA_STUDIO3:
-             switch ((addr >> 8) & 0xf) {
+             switch ((addr >> 8) & 0xff) {
              case 0x0:
              case 0x1:
              case 0x2:
              case 0x3:
-                       return rca_studio_data[addr & 0x3ff];
 
              case 0x4:
              case 0x5:
@@ -257,6 +438,8 @@ mem_read_nocycle(uint8_t r, int add)
                        }
                        break;
 
+             case 0xc:
+             case 0xd:
              case 0x8:
              case 0x9:
                        break;
@@ -336,13 +519,22 @@ mem_write(uint8_t r, uint8_t data)
 
    case RCA_STUDIO2:
    case RCA_STUDIO3:
-             if (((addr >> 8) & 0xe) == 0x8) {
-                 memory[addr & 0xfff] = data;;
-             } else if (((addr >> 8) & 0xf) == 0xb) {
+             switch ((addr >> 8) & 0xff) {
+             case 0xb:       /* Address color pallet, also enable color support */
                  color_en = 0xff;
                  pallet[addr & 0x3f] = data & 0x7;
+                 break;
+
+             case 0x8:      /* Address on board RAM, due to decoding, */
+             case 0x9:      /*  0x8 and 0xc are same memory */
+             case 0xc:
+             case 0xd:
+                 memory[addr & memmask] = data;
+                       break;
+             default:
+                       break;
+
              }
-             break;
     }
 }
 
@@ -383,7 +575,7 @@ void
 taperead()
 {
     tape_read = 1;
-    bitcount = -12*256; // Set size of leader.
+    bitcount = -12*256; /* Set size of leader. */
     leader = 1;
 }
 
@@ -394,7 +586,7 @@ void
 tapewrite()
 {
     tape_write = 1;
-    bitcount = -12*256; // Set size of leader.
+    bitcount = -12*256; /* Set size of leader. */
 }
 
 /*typedef enum { OPR, OPN, OPB, OPO, OPI, OPL} opcode_type; */
@@ -423,6 +615,14 @@ add_op(uint8_t dreg, uint8_t value, uint8_t flag)
  * Followed by 55 lines of blanks. 4 lines before the display starts,
  * display status is starting. 2 lines before interrupt is set. 4
  * lines before the end of screen display status is set.
+ *
+ * If serial I/O is enabled, count timeout and build serial character.
+ * For output continuely append Q flag to bit 9 of output byte. First
+ * bit will be start bit. When there is a 1 in bit 0 we have character.
+ * Send it and clear for next character.
+ *
+ * For input, continue to shift serial input character right. Detected
+ * by looking at bit 0 of EF2.
  *
  */
 void
@@ -454,26 +654,26 @@ cycle()
         }
     }
 
-    // Clear interrupt and display status.
+    /* Clear interrupt and display status. */
     display_status = 0;
     irq_flag = 0;
-    // When to show display status, and post interrupt before first line.
+    /* When to show display status, and post interrupt before first line. */
     if (line >= 76 && line <= 79) {
         display_status = display_on;
-        // Interrupt before frame starts and ends.
+        /* Interrupt before frame starts and ends. */
         if (line >= 78) {
             irq_flag = display_on;
         }
         row = -1;
-    // Just before end of screen
+    /* Just before end of screen */
     } else if(line >= 206 && line <= 210) {
         display_status = display_on;
-    // Main display area.
+    /* Main display area. */
     } else if (line >= 80 && line <= 206 && col >= 2 && col <= 10) {
         if (display_on) {
             dma_out = 1;
         } else {
-            // If not displaying, clear row.
+            /* If not displaying, clear row. */
             for (int i = 0; i < 8; i++) {
                 draw_pixel(0, row, dot_pos++);
             }
@@ -482,21 +682,21 @@ cycle()
        dma_out = 0;
     }
 
-    // Turn DMA off if hit 64 dots.
+    /* Turn DMA off if hit 64 dots. */
     if (dot_pos == 64) {
        dma_out = 0;
     }
 
     col++;
-    // Bump column clock
+    /* Bump column clock */
     if (col == 15) {
         col = 1;
         dot_pos = 0;
         line++;
         row++;
-        // Check if at end of screen
+        /* Check if at end of screen */
         if (line == 262) {
-            // Draw screen and set line to start of screen.
+            /* Draw screen and set line to start of screen. */
             draw_screen();
             line = 1;
         }
@@ -514,7 +714,7 @@ dma_out_cycle()
 {
      uint8_t t = mem_read_adv(0);
 
-    // fprintf(stderr, "Line %d %d %02x\n", line, row, t);
+     /* On DMA output, copy each bit to display memory */
      for (uint8_t m = 0x80; m != 0; m >>= 1) {
          uint8_t value = (t & m) ? 0x7 : 0;
 
@@ -579,25 +779,25 @@ step()
         }
     }
 
-    // If DMA flag set, handle it.
+    /* If DMA flag set, handle it. */
     if (dma_out) {
        dma_out_cycle();
        return;
     }
 
-    // If DMA out flag set, handle it.
+    /* If DMA out flag set, handle it. */
     if (dma_in) {
        dma_in_cycle();
        return;
     }
 
-    // During Idle instruction just sit idle.
+    /* During Idle instruction just sit idle. */
     if (idle) {
         cycle();
         return;
     }
 
-    // Check if interrupt pending.
+    /* Check if interrupt pending. */
     if (I && irq_flag) {
        T = (X << 4) | P;
        P = 1;
@@ -607,12 +807,12 @@ step()
        return;
     }
 
-    // Decode instruction
+    /* Decode instruction */
     uint8_t ir = fetch();
 
     N = ir & 0xf;
     switch((ir >> 4) & 0xf) {
-    case 0x0:  // IDLE & LDN
+    case 0x0:  /* IDLE & LDN */
                if (N == 0) {
                    idle = 1;
                } else {
@@ -620,54 +820,63 @@ step()
                }
                break;
 
-    case 0x1:  // INC
+    case 0x1:  /* INC */
                regs[N]++;
                cycle();
                break;
 
-    case 0x2:  // DEC
+    case 0x2:  /* DEC */
                regs[N]--;
                cycle();
                break;
 
-    case 0x3:  // branch
+    case 0x3:  /* branch */
                switch (N) {
-               case 0x0:   // BR
-               case 0x8:   // NBR
+               case 0x0:   /* BR */
+               case 0x8:   /* NBR */
                            flag = 1;
                            break;
 
-               case 0x1:   // BQ
-               case 0x9:   // BNQ
+               case 0x1:   /* BQ */
+               case 0x9:   /* BNQ */
                            flag = Q;
                            break;
 
-               case 0x2:   // BZ
-               case 0xA:   // BNZ
+               case 0x2:   /* BZ */
+               case 0xA:   /* BNZ */
                            flag = (D==0);
                            break;
 
-               case 0x3:   // BDF
-               case 0xB:   // BNF
+               case 0x3:   /* BDF */
+               case 0xB:   /* BNF */
                            flag = DF;
                            break;
 
-               case 0x4:   // B1
-               case 0xC:   // BN1
+               case 0x4:   /* B1 */
+               case 0xC:   /* BN1 */
+                           if (EF & 0x1) {   /* Used for testing */
+                               flag = 1;
+                               break;
+                           }
                            flag = display_status;
                            break;
 
-               case 0x5:   // B2
-               case 0xD:   // BN2
+               case 0x5:   /* B2 */
+               case 0xD:   /* BN2 */
+                           if (EF & 0x2) {   /* Used for testing */
+                               flag = 1;
+                               break;
+                           }
+
                            if (serial) {
                                flag = !(serial_in & 1);
                                break;
                            }
-                           if (bittimer > 200) {   // If we were not checking tape in, clear timer.
+                           if (bittimer > 200) {   /* If we were not checking tape in, clear timer. */
                                bittimer = 0;
                            }
                            flag = !phase;
-                           // Time how long to keep value high/low.
+                           /* Time how long to keep value high/low. */
                            if (tape_data) {
                                if (bittimer > 133) {
                                    phase = !phase;
@@ -680,13 +889,13 @@ step()
                                }
                            }
 
-                           // Start of bit
+                           /* Start of bit */
                            if (tape_read && phase && bittimer == 0) {
                                switch (bitcount) {
                                default:
                                           bitcount++;
                                           break;
-                               case -1:   // Start bit, grab next value.
+                               case -1:   /* Start bit, grab next value. */
                                           tape_data = 1;
                                           value = tape_read_byte();
                                           printf("Read %02x\n", value);
@@ -714,13 +923,23 @@ step()
                            }
                            break;
 
-               case 0x6:   // B3
-               case 0xE:   // BN3
+               case 0x6:   /* B3 */
+               case 0xE:   /* BN3 */
+                           if (EF & 0x4) {   /* Used for testing */
+                               flag = 1;
+                               break;
+                           }
+
                            flag = key[key_select];
                            break;
 
-               case 0x7:   // B4
-               case 0xF:   // BN4
+               case 0x7:   /* B4 */
+               case 0xF:   /* BN4 */
+                           if (EF & 0x8) {   /* Used for testing */
+                               flag = 1;
+                               break;
+                           }
+
                            if (system_type == RCA_STUDIO2) {
                                flag = key2[key_select];
                            } else {
@@ -730,31 +949,31 @@ step()
 
                }
 
-               // If opcode >= 8 reverse flag value.
+               /* If opcode >= 8 reverse flag value. */
                flag ^= ((N >> 3) & 1);
 
                word = (uint16_t)fetch();
-               // If flag true, branch to location on same page.
+               /* If flag true, branch to location on same page. */
                if (flag) {
                    regs[P] = (regs[P] & 0xff00) | word;
                }
                break;
 
-    case 0x4:  // LDA
+    case 0x4:  /* LDA */
                D = mem_read_adv(N);
                break;
 
-    case 0x5:  // STR
+    case 0x5:  /* STR */
                mem_write(N, D);
                break;
 
-    case 0x6:  // Process input and output instructions.
+    case 0x6:  /* Process input and output instructions. */
                switch (N) {
-               case 0x0:   // IRX
+               case 0x0:   /* IRX */
                            (void)mem_read_adv(X);
                            break;
 
-               case 0x1:   // OUT 1
+               case 0x1:   /* OUT 1 */
                            (void)mem_read_adv(X);
                            switch(system_type) {
                            case VIP:
@@ -769,87 +988,87 @@ step()
                            }
                            break;
 
-               case 0x2:   // OUT 2
-                           // Keyboard select
+               case 0x2:   /* OUT 2 */
+                           /* Keyboard select */
                            key_select = mem_read_adv(X) & 0xf;
                            break;
 
-               case 0x3:   // OUT 3
-                           // Output port;
+               case 0x3:   /* OUT 3 */
+                           /* Output port; */
                            (void)mem_read_adv(X);
                            break;
 
-               case 0x4:   // OUT 4
+               case 0x4:   /* OUT 4 */
                            (void)mem_read_adv(X);
                            rom_enable = 0;
                            break;
 
-               case 0x5:   // OUT 5
+               case 0x5:   /* OUT 5 */
                            (void)mem_read_adv(X);
                            bg_color = (bg_color + 1) & 0x3;
                            rom_enable = 0;
                            break;
 
-               case 0x6:   // OUT 6
+               case 0x6:   /* OUT 6 */
                            (void)mem_read_adv(X);
                            rom_enable = 0;
                            break;
 
-               case 0x7:   // OUT 7
+               case 0x7:   /* OUT 7 */
                            (void)mem_read_adv(X);
                            rom_enable = 0;
                            break;
 
-               case 0x8:   // NOP
-               case 0xA:   // INP 2
-               case 0xC:   // INP 4
-               case 0xD:   // INP 5
-               case 0xF:   // INP 7
+               case 0x8:   /* NOP */
+               case 0xA:   /* INP 2 */
+               case 0xC:   /* INP 4 */
+               case 0xD:   /* INP 5 */
+               case 0xF:   /* INP 7 */
                            mem_write(X, 0xff);
                            break;
 
-               case 0x9:   // INP 1
+               case 0x9:   /* INP 1 */
                            set_display_on();
                            mem_write(X, 0xff);
                            break;
 
-               case 0xB:   // INP 3
-                           // Input port
+               case 0xB:   /* INP 3 */
+                           /* Input port */
                            break;
 
-               case 0xE:   // INP 6
+               case 0xE:   /* INP 6 */
                            break;
 
                }
                break;
 
-    case 0x7:  // Process operator instructions.
+    case 0x7:  /* Process operator instructions. */
                switch (N) {
-               case 0x0:   // RET
-               case 0x1:   // DIS
+               case 0x0:   /* RET */
+               case 0x1:   /* DIS */
                            temp = mem_read_adv(X);
                            X = (temp >> 4) & 0xf;
                            P = (temp) & 0xf;
                            I = !(N & 1);
                            break;
 
-               case 0x2:   // LDXA
+               case 0x2:   /* LDXA */
                            D = mem_read_adv(X);
                            break;
 
-               case 0x3:   // STXD
+               case 0x3:   /* STXD */
                            mem_write_back(X, D);
                            break;
 
-               case 0x4:   // ADC
+               case 0x4:   /* ADC */
                            add_op(D, mem_read(X), DF);
                            break;
 
-               case 0x5:   // SDB
+               case 0x5:   /* SDB */
                            add_op(D^0xff, mem_read(X), !DF);
                            break;
 
-               case 0x6:   // SHRC
+               case 0x6:   /* SHRC */
                            flag = DF;
                            DF = D & 0x1;
                            D >>= 1;
@@ -859,21 +1078,21 @@ step()
                            cycle();
                            break;
 
-               case 0x7:   // SMB
+               case 0x7:   /* SMB */
                            add_op(D, mem_read(X)^0xff, !DF);
                            break;
 
-               case 0x8:   // SAV
+               case 0x8:   /* SAV */
                            mem_write(X, T);
                            break;
 
-               case 0x9:   // MARK
+               case 0x9:   /* MARK */
                            T = (X << 4) | P;
                            mem_write_back(2, T);
                            X = P;
                            break;
 
-               case 0xA:   // REQ
+               case 0xA:   /* REQ */
                            Q = 0;
                            cycle();
                            serial_out_cnt = 100;
@@ -885,7 +1104,7 @@ step()
                                }
                                switch (bitcount) {
                                case -1:
-                                       if (v) {  // Start bit.
+                                       if (v) {  /* Start bit. */
                                            bitcount++;
                                        }
                                        break;
@@ -903,7 +1122,7 @@ step()
                                        break;
 
                                case 8:
-                                       // Parity
+                                       /* Parity */
                                        tape_write_byte(value);
                                        bitcount = -1;
                                        value = 0;
@@ -912,7 +1131,7 @@ step()
                            }
                            break;
 
-               case 0xB:   // SEQ
+               case 0xB:   /* SEQ */
                            Q = 1;
                            cycle();
                            if (serial_out == 0) {
@@ -921,15 +1140,15 @@ step()
                            lastcycle = tapecycles;
                            break;
 
-               case 0xC:   // ADCI
+               case 0xC:   /* ADCI */
                            add_op(D, fetch(), DF);
                            break;
 
-               case 0xD:   // SDBI
+               case 0xD:   /* SDBI */
                            add_op(D ^ 0xff, fetch(), !DF);
                            break;
 
-               case 0xE:   // SHLC
+               case 0xE:   /* SHLC */
                            cycle();
                            flag = DF;
                            DF = !!(D & 0x80);
@@ -937,58 +1156,59 @@ step()
                            D |= flag;
                            break;
 
-               case 0xF:   // SMBI
+               case 0xF:   /* SMBI */
                            add_op(D, fetch() ^ 0xff, !DF);
                            break;
                }
                break;
 
-    case 0x8:  // GLO
+    case 0x8:  /* GLO */
                D = regs[N] & 0xff;
                cycle();
                break;
 
-    case 0x9:  // GHI
+    case 0x9:  /* GHI */
                D = (regs[N] >> 8) & 0xff;
                cycle();
                break;
 
-    case 0xA:  // PLO
+    case 0xA:  /* PLO */
                regs[N] = (regs[N] & 0xff00) | (uint16_t)D;
                cycle();
                break;
 
-    case 0xB:  // PHI
+    case 0xB:  /* PHI */
                word = (uint16_t)D << 8;
                regs[N] = (regs[N] & 0x00ff) | word;
                cycle();
                break;
 
-    case 0xC:  // Process long branch and long skip instructions.
-               //        00xx      01xx      10xx    11xx
-               // xx00    1         !1        !1       I
-               // xx01    Q         !Q        !Q       Q
-               // xx10    !D        D         D        !D
-               // xx11    DF        !DF       !DF      DF
-               //        branch    skip     branch    skip
-               //
-               //       00 1      0             | (!2 & !3)
-               //       01 0      0             |  0
-               //       10 0      0             |  0
-               //       11 I      (I & (2 & 3)) |  0
-               //
-               //   Branch or (skip taken). Read P and increment.
-               //   Skip !taken. Read P, no increment.
-               //   branch taken, Set P to result of fetch.
+    case 0xC:  /* Process long branch and long skip instructions.
+                *        00xx      01xx      10xx    11xx
+                * xx00    1         !1        !1       I
+                * xx01    Q         !Q        !Q       Q
+                * xx10    !D        D         D        !D
+                * xx11    DF        !DF       !DF      DF
+                *        branch    skip     branch    skip
+                *
+                *       00 1      0             | (!2 & !3)
+                *       01 0      0             |  0
+                *       10 0      0             |  0
+                *       11 I      (I & (2 & 3)) |  0
+                *
+                *   Branch or (skip taken). Read P and increment.
+                *   Skip !taken. Read P, no increment.
+                *   branch taken, Set P to result of fetch.
+                */
 
                switch (N) {
-               case 0x0:   // LBR
+               case 0x0:   /* LBR */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           regs[P] = word;
                           break;
 
-               case 0x1:  // LBQ
+               case 0x1:  /* LBQ */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (Q) {
@@ -996,7 +1216,7 @@ step()
                           }
                           break;
 
-               case 0x2:  // LBZ
+               case 0x2:  /* LBZ */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (D == 0) {
@@ -1004,7 +1224,7 @@ step()
                           }
                           break;
 
-               case 0x3:  // LBDF
+               case 0x3:  /* LBDF */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (DF) {
@@ -1012,12 +1232,12 @@ step()
                           }
                           break;
 
-               case 0x4:  // NOP
+               case 0x4:  /* NOP */
                           (void)mem_read(P);
                           (void)mem_read(P);
                           break;
 
-               case 0x5:  // LSNQ
+               case 0x5:  /* LSNQ */
                           if (!Q) {
                               (void)fetch();
                               (void)fetch();
@@ -1027,7 +1247,7 @@ step()
                           }
                           break;
 
-               case 0x6:  // LSNZ
+               case 0x6:  /* LSNZ */
                           if (D != 0) {
                               (void)fetch();
                               (void)fetch();
@@ -1037,7 +1257,7 @@ step()
                           }
                           break;
 
-               case 0x7:  // LSNF
+               case 0x7:  /* LSNF */
                           if (!DF) {
                               (void)fetch();
                               (void)fetch();
@@ -1047,12 +1267,12 @@ step()
                           }
                           break;
 
-               case 0x8:  // LSKP
+               case 0x8:  /* LSKP */
                           (void)fetch();
                           (void)fetch();
                           break;
 
-               case 0x9:  // LBNQ
+               case 0x9:  /* LBNQ */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (!Q) {
@@ -1060,7 +1280,7 @@ step()
                           }
                           break;
 
-               case 0xA:  // LBNZ
+               case 0xA:  /* LBNZ */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (D != 0) {
@@ -1068,7 +1288,7 @@ step()
                           }
                           break;
 
-               case 0xB:  // LBNF
+               case 0xB:  /* LBNF */
                           word = ((uint16_t)fetch()) << 8;
                           word |= (uint16_t)fetch();
                           if (!DF) {
@@ -1076,7 +1296,7 @@ step()
                           }
                           break;
 
-               case 0xC:  // LSIE
+               case 0xC:  /* LSIE */
                           if (I) {
                               (void)fetch();
                               (void)fetch();
@@ -1086,7 +1306,7 @@ step()
                           }
                           break;
 
-               case 0xD:  // LSQ
+               case 0xD:  /* LSQ */
                           if (Q) {
                               (void)fetch();
                               (void)fetch();
@@ -1096,7 +1316,7 @@ step()
                           }
                           break;
 
-               case 0xE:  // LSZ
+               case 0xE:  /* LSZ */
                           if (D == 0) {
                               (void)fetch();
                               (void)fetch();
@@ -1106,7 +1326,7 @@ step()
                           }
                           break;
 
-               case 0xF:  // LSDF
+               case 0xF:  /* LSDF */
                           if (DF) {
                               (void)fetch();
                               (void)fetch();
@@ -1118,88 +1338,87 @@ step()
                }
                break;
 
-    case 0xD:  // SEP
+    case 0xD:  /* SEP */
                P = N;
                cycle();
                break;
 
-    case 0xE:  // SEX
+    case 0xE:  /* SEX */
                X = N;
                cycle();
                break;
 
-    case 0xF:  // Second operator group instructions.
+    case 0xF:  /* Second operator group instructions. */
                switch(N) {
-               case 0x0:   // LDX
+               case 0x0:   /* LDX */
                            D = mem_read(X);
                            break;
 
-               case 0x1:   // OR
+               case 0x1:   /* OR */
                            D |= mem_read(X);
                            break;
 
-               case 0x2:   // AND
+               case 0x2:   /* AND */
                            D &= mem_read(X);
                            break;
 
-               case 0x3:   // XOR
+               case 0x3:   /* XOR */
                            D ^= mem_read(X);
                            break;
 
-               case 0x4:   // ADD
+               case 0x4:   /* ADD */
                            add_op(D, mem_read(X), 0);
                            break;
 
-               case 0x5:   // SD
+               case 0x5:   /* SD */
                            add_op(D ^ 0xff, mem_read(X), 1);
                            break;
 
-               case 0x6:   // SHR
+               case 0x6:   /* SHR */
                            DF = D & 0x1;
                            D >>= 1;
                            cycle();
                            break;
 
-               case 0x7:   // SM
+               case 0x7:   /* SM */
                            add_op(D, mem_read(X) ^ 0xff, 1);
                            break;
 
-               case 0x8:   // LDI
+               case 0x8:   /* LDI */
                            D = fetch();
                            break;
 
-               case 0x9:   // ORI
+               case 0x9:   /* ORI */
                            D |= fetch();
                            break;
 
-               case 0xA:   // ANI
+               case 0xA:   /* ANI */
                            D &= fetch();
                            break;
 
-               case 0xB:   // XRI
+               case 0xB:   /* XRI */
                            D ^= fetch();
                            break;
 
-               case 0xC:   // ADI
+               case 0xC:   /* ADI */
                            add_op(D, fetch(), 0);
                            break;
 
-               case 0xD:   // SDI
+               case 0xD:   /* SDI */
                            add_op(D ^ 0xff, fetch(), 1);
                            break;
 
-               case 0xE:   // SHL
+               case 0xE:   /* SHL */
                            DF = !!(D & 0x80);
                            D <<= 1;
                            cycle();
                            break;
 
-               case 0xF:   // SMI
+               case 0xF:   /* SMI */
                            add_op(D, fetch() ^ 0xff, 1);
                            break;
                }
                break;
      }
 }
-
 

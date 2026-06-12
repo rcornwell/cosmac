@@ -52,45 +52,45 @@ disassemble(char *res, uint8_t ir, uint16_t pc, uint16_t addr, int *len)
 
     *len = 1;
 
-    // Search opcode map for match
+    /* Search opcode map for match */
     for(op = opcode_map; op->name != NULL; op++) {
         if ((ir & op->mask) == op->base) {
             break;
         }
     }
 
-    // If not found dump possible opcode
+    /* If not found dump possible opcode */
     if (op->name == NULL) {
         sprintf(res, ",%02x ", ir);
         return;
     }
 
-    // Convert opcode based on type.
+    /* Convert opcode based on type. */
     *len = op->len;
     strcpy(res, op->name);
 
     switch(op->type) {
-    case OPR:  // Basic operators.
+    case OPR:  /* Basic operators. */
          temp[0] = '\0';
          break;
 
-    case OPN:  // Index register operators.
+    case OPN:  /* Index register operators. */
          sprintf(temp, " R%X", ir & 0xf);
          break;
 
-    case OPB:  // Short branch instructions.
+    case OPB:  /* Short branch instructions. */
          sprintf(temp, " L%03x", (pc & 0x0f00) | (addr & 0xff));
          break;
 
-    case OPO:  // Input/output instructions.
+    case OPO:  /* Input/output instructions. */
          sprintf(temp, " %d", ir & 0x7);
          break;
 
-    case OPI: // Immediate value instructions.
+    case OPI: /* Immediate value instructions. */
          sprintf(temp, " #%02x", addr & 0xff);
          break;
 
-    case OPL: // Long branches.
+    case OPL: /* Long branches. */
          sprintf(temp, " L%x%02x", addr & 0xf,  (addr >> 8) & 0xff);
          break;
     }
@@ -204,6 +204,7 @@ read_dump(char *name)
          return 0;
      }
 
+     /* Read in line of input */
      while(fgets(buffer, sizeof(buffer), in) != NULL) {
         int       count = 0;
         char      *digit;
@@ -212,16 +213,17 @@ read_dump(char *name)
         uint16_t  value = 0;
 
         for (ptr = buffer; *ptr != '\0'; ptr++) {
-            // If space skip to next char.
+            /* If space skip to next char. */
             if (isspace(*ptr)) {
                 continue;
             }
 
-            // Terminate scan on ;.
+            /* Terminate scan on ;. */
             if (*ptr == ';') {
                 break;
             }
 
+            /* Convert hex digits to binary */
             digit = strchr(hex, toupper(*ptr));
             if (digit == NULL) {
                 fprintf(stderr, "Invalid character %s: %s", name, buffer);
@@ -230,14 +232,18 @@ read_dump(char *name)
             }
             value = (value << 4) | (digit - hex);
             count++;
+            /* First 4 digits are address */
             if (count == 4) {
                 address = value;
                 value = 0;
                 continue;
             }
+            /* Check if address over 32K */
             if (address > (32 * 1024)) {
                 break;
             }
+
+            /* Every 2 hex digits, deposit another byte */
             if ((count > 4) && (count & 1) == 0) {
                 memory[address++] = value;
                 value = 0;

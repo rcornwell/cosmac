@@ -86,6 +86,14 @@ int read_bin(char *name);
 int read_dump(char *name);
 
 /**
+ * @brief Read in ST2 file for RCA Studio II.
+ *
+ * ST2 files consist of a header, game title, and list of pages to
+ * load ROM into.
+ */
+int read_st2(char *name);
+
+/**
  * @brief Initialize SDL2 - create the main window, renderer, texture,
  *        and audio device with square wave audio callback support.
  *

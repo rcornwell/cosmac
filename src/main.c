@@ -196,6 +196,9 @@ int main(int argc, char **argv)
      memmask = 0xfff;
      system_type = VIP;
 
+     /* Set memory to undefined access */
+     for (i = memsize; i < (int)sizeof(memory); memory[i++] = 0xff);
+
      /* Scan for arguments */
      for (i = 1; i < argc; i++) {
          if (argv[i][0] == '-') {
@@ -255,7 +258,7 @@ int main(int argc, char **argv)
                                     memmask = 0x9ff;
                                     memsize = 4096;
                                     bin_base = 1024;
-                           break;
+                                    break;
                            }
                            i++;
                            break;
@@ -374,29 +377,33 @@ int main(int argc, char **argv)
 int
 read_bin(char *name)
 {
-     FILE    *in = fopen(name, "rb");
+     FILE    *in;
      char    *p;
      size_t   len;
      size_t   got;
 
+     p = strrchr(name, '.');
+     if (p != NULL && strcmp(p, ".st2") == 0) {
+         cartridge = 1;
+         if (read_st2(name)) {
+             return 1;
+         }
+     }
+
+     in = fopen(name, "rb");
      if (in == NULL) {
          fprintf(stderr, "Unable to read file %s: %s\n", name, strerror(errno));
          return 0;
      }
 
+     /* Find length of file */
      fseek(in, 0, SEEK_END);
      len = ftell(in);
      rewind(in);
 
+     /* Cap at 32K */
      if (len > (32 * 1024)) {
          len = 32 * 1024;
-     }
-
-     p = strrchr(name, '.');
-     if (cartridge && p != NULL && strcmp(p, ".st2") == 0) {
-         printf("Studio 2 cartridge\n");
-         bin_base -= 256;
-         cartridge = 1;
      }
 
      got = fread(&memory[bin_base], 1, len, in);
@@ -410,6 +417,78 @@ read_bin(char *name)
 
      fclose(in);
      fprintf(stderr, "Read %ld bytes from %s to %04x \n", got, name, bin_base);
+     bin_base += got;
+     return 1;
+}
+
+/**
+ * @brief Read .st2 file for RCA Studio.
+ *
+ * @param name Name of file to read.
+ * @return 1 on success, 0 on failure.
+ */
+int
+read_st2(char *name)
+{
+     FILE    *in;
+     int      i;
+     uint8_t  header[256];
+     int      blk;
+     size_t   len;
+     size_t   got;
+
+     in = fopen(name, "rb");
+     if (in == NULL) {
+         fprintf(stderr, "Unable to read file %s: %s\n", name, strerror(errno));
+         return 0;
+     }
+
+     /* Find length of file */
+     fseek(in, 0, SEEK_END);
+     len = ftell(in);
+     rewind(in);
+
+     len >>= 8;   /* Compute number of blocks */
+     blk = 1;
+
+     /* Read in header */
+     got = fread(&header[0], 1, sizeof(header), in);
+
+     if (strncmp(header, "RCA2", 4) != 0 || header[4] != len || header[5] != 1) {
+        fprintf(stderr, "Not ST2 file, treating as bin\n");
+        fclose(in);
+        return 0;
+    }
+
+    /* Print out title */
+    fprintf(stderr, "RCA Studio2: ");
+    for (i = 32; header[i] != '\0' && i < 64; i++) {
+        fputc(header[i], stderr);
+    }
+    fputc('\n', stderr);
+
+    /* Read each block into memory */
+    for (i = 64; i < 128; i++) {
+        bin_base = ((uint16_t)header[i]) << 8;
+        if (bin_base == 0) {
+            continue;
+        }
+        if (blk > len) {
+            fprintf(stderr, "short file  %s\n", name);
+            return 0;
+        }
+        got = fread(&memory[bin_base], 1, 256, in);
+             fprintf(stderr, "read  %d %04x\n", blk, bin_base);
+        if (got != 256) {
+             fprintf(stderr, "short file  %s %d\n", name, got);
+             fclose(in);
+             return 0;
+        }
+        blk ++;
+     }
+
+     fclose(in);
+     fprintf(stderr, "Read %d bytes from %s\n", ((blk-1) * 256), name);
      bin_base += got;
      return 1;
 }

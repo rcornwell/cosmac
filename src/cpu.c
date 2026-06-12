@@ -272,8 +272,6 @@ get_cycles()
 void
 reset()
 {
-    int     i;
-
     running = 0;
     rom_enable = 0x8000;   /* Force all addresses to access rom */
     I = 1;
@@ -310,7 +308,6 @@ reset()
     leader = 0;
     bg_color = 0;
     color_en = 0;
-    for (i = memsize; i < (int)sizeof(memory); memory[i++] = 0xff);
 }
 
 /**
@@ -398,6 +395,8 @@ set_display_on() {
  *       EF3           Keypad Left
  *       EF4           Keypad Right
  *
+ * When running test cartridge, 0x400-0x7ff is duplicated at 0x4000-0x43ff.
+ * The valid copy of system rom is at 0x2000 to 0x27ff.
  */
 
 inline uint8_t
@@ -424,32 +423,22 @@ mem_read_nocycle(uint8_t r, int add)
    case RCA_STUDIO2:
    case RCA_STUDIO3:
              switch ((addr >> 8) & 0xff) {
-             case 0x0:
-             case 0x1:
-             case 0x2:
-             case 0x3:
+             /* System interpreter rom */
+             case 0x0: case 0x1: case 0x2: case 0x3:
                       return rca_studio_data[addr & 0x7ff];
 
-             case 0x4:
-             case 0x5:
-             case 0x6:
-             case 0x7:
-                       if (!cartridge) {
+             case 0x4: case 0x5: case 0x6: case 0x7:
+                       if (!cartridge || rom_enable) {
                           return rca_studio_data[addr & 0x7ff];
                        }
-                       return memory[addr & 0xffff];
+                       return memory[addr & 0x7ff];
 
-             case 0xc:
-             case 0xd:
-             case 0x8:
-             case 0x9:
-                       break;
              default:
-                   return 0xff;
+                       return memory[addr & 0x7fff];
              }
              break;
     }
-   return memory[addr & memmask];
+    return memory[addr & memmask];
 }
 
 /**
@@ -463,7 +452,30 @@ mem_read_nocycle(uint8_t r, int add)
 inline uint8_t
 mem_read(uint8_t r)
 {
+    uint16_t addr = regs[r];
     cycle();
+
+    switch (system_type) {
+    case VIP:
+    case VP:
+             break;
+
+   case RCA_STUDIO2:
+   case RCA_STUDIO3:
+             rom_enable = 0;
+             if ((addr & 0xfc00) == 0x4000) {
+                 /* When running from mirror rom, access to lower
+                  * memory is enabled for next cycle.
+                  * This simulates the effect of the CD4013 flip
+                  * flop.
+                  *
+                  * When enabled, next access to cartridge area
+                  * will select system roms.
+                  */
+                 rom_enable = 1;
+             }
+             break;
+    }
     return mem_read_nocycle(r, 0);
 }
 

@@ -428,6 +428,7 @@ mem_read_nocycle(uint8_t r, int add)
              case 0x1:
              case 0x2:
              case 0x3:
+                      return rca_studio_data[addr & 0x7ff];
 
              case 0x4:
              case 0x5:
@@ -436,7 +437,7 @@ mem_read_nocycle(uint8_t r, int add)
                        if (!cartridge) {
                           return rca_studio_data[addr & 0x7ff];
                        }
-                       break;
+                       return memory[addr & 0xffff];
 
              case 0xc:
              case 0xd:
@@ -521,15 +522,15 @@ mem_write(uint8_t r, uint8_t data)
    case RCA_STUDIO3:
              switch ((addr >> 8) & 0xff) {
              case 0xb:       /* Address color pallet, also enable color support */
-                 color_en = 0xff;
-                 pallet[addr & 0x3f] = data & 0x7;
-                 break;
+                       color_en = 0xff;
+                       pallet[addr & 0x3f] = data & 0x7;
+                       break;
 
              case 0x8:      /* Address on board RAM, due to decoding, */
              case 0x9:      /*  0x8 and 0xc are same memory */
              case 0xc:
              case 0xd:
-                 memory[addr & memmask] = data;
+                       memory[addr & memmask] = data;
                        break;
              default:
                        break;

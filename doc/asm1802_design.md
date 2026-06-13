@@ -2,11 +2,11 @@
 
 ## 1. Overview
 
-`asm1802.c` is a two-pass cross-assembler for the TI COSMAC 1802 microprocessor. It transforms COSMAC Level I assembly language (defined in `asm1802.md`) into hex code listings and/or binary machine code.
+`asm1802.c` is a two-pass cross-assembler for the RCA 1802 microprocessor. It transforms CDP1802 Level I assembly language (defined in `asm1802.md`) into hex code listings and/or binary machine code.
 
 ### 1.1 What the 1802 Assembler Targets
 
-The CDP1802 is an 8-bit RISC CPU with a 64KB address space (16-bit address bus). Its instructions are all single-byte opcodes (except long branches, which are 3 bytes) with variable-length operand fields. The ISA defines six instruction operand formats:
+The CDP1802 is an 8-bit CPU with a 64KB address space (16-bit address bus). Its instructions are mostly single-byte opcodes (except long branches, which are 3 bytes), and immediate operations which have byte of data. The ISA defines six instruction operand formats:
 
 | Format | Operand | Example          | Output           |
 |--------|---------|------------------|------------------|

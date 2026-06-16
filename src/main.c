@@ -480,7 +480,7 @@ read_st2(char *name)
         got = fread(&memory[bin_base], 1, 256, in);
              fprintf(stderr, "read  %d %04x\n", blk, bin_base);
         if (got != 256) {
-             fprintf(stderr, "short file  %s %d\n", name, got);
+             fprintf(stderr, "short file  %s %ld\n", name, got);
              fclose(in);
              return 0;
         }

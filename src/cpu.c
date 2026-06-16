@@ -711,10 +711,9 @@ cycle()
         if (line == 262) {
             /* Draw screen and set line to start of screen. */
             draw_screen();
-            line = 1;
+            line = 0;
         }
     }
-
 }
 
 /**
@@ -1034,24 +1033,20 @@ step()
 
                case 0x8:   /* NOP */
                case 0xA:   /* INP 2 */
+               case 0xB:   /* INP 3 */
                case 0xC:   /* INP 4 */
                case 0xD:   /* INP 5 */
+               case 0xE:   /* INP 6 */
                case 0xF:   /* INP 7 */
                            mem_write(X, 0xff);
+                           D = 0xff;
                            break;
 
                case 0x9:   /* INP 1 */
                            set_display_on();
                            mem_write(X, 0xff);
+                           D = 0xff;
                            break;
-
-               case 0xB:   /* INP 3 */
-                           /* Input port */
-                           break;
-
-               case 0xE:   /* INP 6 */
-                           break;
-
                }
                break;
 

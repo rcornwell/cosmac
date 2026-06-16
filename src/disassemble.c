@@ -149,7 +149,7 @@ void
 trace()
 {
     char      line[60];
-    char      rdmp[130];
+    char      rdmp[150];
     char      inst[40];
     uint16_t  addr;
     uint8_t   ir;
